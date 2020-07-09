@@ -6,21 +6,7 @@
 #include <string.h>
 #include <limits.h>
 #include <time.h>
-
-/* Half the number of characters spanned by a single hour.
- * Must be at least 1. */
-#define DEF_HRESOLUTION 4
-
-#define and ";"
-#define clear ";"
-#define fgcol(col) "38;5;" #col
-#define bgcol(col) "48;5;" #col
-#define bold "1"
-#define invert "7"
-#define ansifmt(style) "\x1b[" style "m"
-
-#define ARROW "\u2191"
-#define ELLIPSIS "\u2026"
+#include <unistd.h>
 
 enum dow {
 	SU, MO, TU, WE, TH, FR, SA
@@ -47,20 +33,23 @@ struct sel_constraint {
 };
 
 struct selector {
-	struct sel_constraint t, dow, dom, m, y;
+	struct sel_constraint min, hour, dow, dom, month, year;
 	long dur;
 	struct selector *next;
 };
 
 struct entry {
-	char *title;
-	char *desc;
+	char *text;
 	struct selector *sel;
 	struct entry *next;
 };
 
+struct entry_iter {
+	struct entry *entry;
+};
+
 void
-error(char *msg)
+errexit(char *msg)
 {
 	fprintf(stderr, "error: %s\n", msg);
 	exit(1);
@@ -72,9 +61,53 @@ safemalloc(size_t n)
 	void *ptr;
 
 	if ((ptr = malloc(n)) == NULL) {
-		error("out of memory");
+		errexit("out of memory");
 	}
 	return ptr;
+}
+
+#define ERRCTX_LEN 16
+static char const *errctx[ERRCTX_LEN];
+static int errctxi = 0;
+#define ERRCTX_LINECNT_LEN 32
+static char errctx_linecnt[ERRCTX_LINECNT_LEN];
+
+void
+push_errctx(char const *msg)
+{
+	if (errctxi < ERRCTX_LEN) errctx[errctxi++] = msg;
+}
+
+void
+push_errctx_linecnt(long linecnt)
+{
+	snprintf(errctx_linecnt, ERRCTX_LINECNT_LEN, "line %ld", linecnt);
+	push_errctx(errctx_linecnt);
+}
+
+char *
+concat_errctx()
+{
+	char *s;
+	size_t slen, offs, need;
+
+	for (s = NULL, offs = 0, slen = 64; errctxi; slen *= 2) {
+		if (!(s = realloc(s, slen))) errexit("out of memory");
+		for (; errctxi; --errctxi) {
+			need = strlen(errctx[errctxi-1])+2;
+			if (need > slen - offs) break; /* Double buffer size. */
+			memcpy(&s[offs], errctx[errctxi-1], need-2);
+			offs += need-2;
+			if (errctxi > 1) {
+				s[offs++] = ':';
+				s[offs++] = ' ';
+			} else {
+				s[offs++] = '\0';
+			}
+		}
+	}
+
+	return s;
 }
 
 char *
@@ -118,122 +151,152 @@ stripws(char **s)
 }
 
 int
-time2num(char *s)
-{
-	int h, m;
-
-	if (strlen(s) != 4) {
-		error("bad time: invalid length");
-	}
-	if (!isdigit(s[0]) || !isdigit(s[1]) || !isdigit(s[2]) || !isdigit(s[3])) {
-		error("bad time: contains non digits");
-	}
-	h = (s[0] - '0') * 10 + (s[1] - '0');
-	if (h < 0 || h > 23) {
-		error("bad time: hour out of bounds");
-	}
-	m = (s[2] - '0') * 10 + (s[3] - '0');
-	if (m < 0 || m > 59) {
-		error("bad time: minute out of bounds");
-	}
-
-	return h * 60 + m;
-}
-
-int
-dow2num(char *s)
-{
-	int dow;
-
-	if (strlen(s) != 2) {
-		error("bad day of week: invalid length");
-	}
-	s[0] = tolower(s[0]);
-	s[1] = tolower(s[1]);
-	if      (strcmp(s, "su") == 0) dow = SU;
-	else if (strcmp(s, "mo") == 0) dow = MO;
-	else if (strcmp(s, "tu") == 0) dow = TU;
-	else if (strcmp(s, "we") == 0) dow = WE;
-	else if (strcmp(s, "th") == 0) dow = TH;
-	else if (strcmp(s, "fr") == 0) dow = FR;
-	else if (strcmp(s, "sa") == 0) dow = SA;
-	else error("bad day of week");
-
-	return dow;
-}
-
-int
-dom2num(char *s)
-{
-	int dom;
-
-	dom = 0;
-	switch (strlen(s)) {
-	case 2:
-		if (!isdigit(*s)) error("bad day of month: contains non digits");
-		dom = (*s - '0') * 10;
-		++s;
-	case 1:
-		if (!isdigit(*s)) error("bad day of month: contains non digits");
-		dom += s[0] - '0';
-		break;
-	default:
-		error("bad day of month: invalid length");
-	}
-	if (dom < 1 || dom > 31) {
-		error("bad day of month: out of bounds");
-	}
-
-	return dom;
-}
-
-int
-month2num(char *s)
+parse_minutes(char **s)
 {
 	int m;
 
-	if (strlen(s) != 3) {
-		error("bad month: invalid length");
+	if (!isdigit((*s)[0]) || !isdigit((*s)[1])) {
+		push_errctx("bad minutes: invalid length or contains non digits");
+		return -1;
 	}
-	s[0] = tolower(s[0]);
-	s[1] = tolower(s[1]);
-	s[2] = tolower(s[2]);
-	if      (strcmp(s, "jan") == 0) m = JAN;
-	else if (strcmp(s, "feb") == 0) m = FEB;
-	else if (strcmp(s, "mar") == 0) m = MAR;
-	else if (strcmp(s, "apr") == 0) m = APR;
-	else if (strcmp(s, "may") == 0) m = MAY;
-	else if (strcmp(s, "jun") == 0) m = JUN;
-	else if (strcmp(s, "jul") == 0) m = JUL;
-	else if (strcmp(s, "aug") == 0) m = AUG;
-	else if (strcmp(s, "sep") == 0) m = SEP;
-	else if (strcmp(s, "oct") == 0) m = OCT;
-	else if (strcmp(s, "nov") == 0) m = NOV;
-	else if (strcmp(s, "dec") == 0) m = DEC;
-	else error("bad month");
+	m = ((*s)[0] - '0') * 10 + ((*s)[1] - '0');
+	if (m < 0 || m >= 60) {
+		push_errctx("bad minutes: out of bounds (need 0 <= m < 60)");
+		return -1;
+	}
+	*s += 2;
 
 	return m;
 }
 
 int
-year2num(char *s)
+parse_hours(char **s)
 {
-	char *end;
-	long l;
+	int h;
 
-	l = strtol(s, &end, 10);
-	if (end == s) {
-		error("bad year: no digits");
+	if (!isdigit((*s)[0]) || !isdigit((*s)[1])) {
+		push_errctx("bad hours: invalid length or contains non digits");
+		return -1;
 	}
-	if (l < 0 || l > INT_MAX) {
-		error("bad year: out of bounds");
+	h = ((*s)[0] - '0') * 10 + ((*s)[1] - '0');
+	if (h < 0 || h >= 24) {
+		push_errctx("bad hours: out of bounds (need 0 <= h < 24)");
+		return -1;
 	}
+	*s += 2;
 
-	return (int) l;
+	return h;
 }
 
-void
-parse_sel_constraint(struct sel_constraint *head, char *s, int (*str2num)(char*))
+int
+parse_dow(char **s)
+{
+	int dow;
+	char b[2];
+
+	if ((*s)[0] == '\0' || (*s)[1] == '\0') {
+		push_errctx("bad day of week: invalid length");
+		return -1;
+	}
+	b[0] = tolower((*s)[0]);
+	b[1] = tolower((*s)[1]);
+	if      (b[0]=='s' && b[1]=='u') dow = SU;
+	else if (b[0]=='m' && b[1]=='o') dow = MO;
+	else if (b[0]=='t' && b[1]=='u') dow = TU;
+	else if (b[0]=='w' && b[1]=='e') dow = WE;
+	else if (b[0]=='t' && b[1]=='h') dow = TH;
+	else if (b[0]=='f' && b[1]=='r') dow = FR;
+	else if (b[0]=='s' && b[1]=='a') dow = SA;
+	else {
+		push_errctx("bad day of week");
+		return -1;
+	}
+	*s += 2;
+
+	return dow;
+}
+
+int
+parse_dom(char **s)
+{
+	int dom;
+
+	if (!isdigit((*s)[0]) || !isdigit((*s)[1])) {
+		push_errctx("bad day of month: invalid length or contains non digits");
+		return -1;
+	}
+	dom = ((*s)[0] - '0') * 10 + ((*s)[1] - '0');
+	if (dom < 1 || dom > 31) {
+		push_errctx("bad day of month: out of bounds (need 1 <= dom <= 31)");
+		return -1;
+	}
+	*s += 2;
+
+	return dom;
+}
+
+int
+parse_month(char **s)
+{
+	int m;
+	char b[3];
+
+	if ((*s)[0] == '\0' || (*s)[1] == '\0' || (*s)[2] == '\0') {
+		push_errctx("bad month: invalid length");
+		return -1;
+	}
+	b[0] = tolower((*s)[0]);
+	b[1] = tolower((*s)[1]);
+	b[2] = tolower((*s)[2]);
+	if      (b[0]=='j' && b[1]=='a' && b[2]=='n') m = JAN;
+	else if (b[0]=='f' && b[1]=='e' && b[2]=='b') m = FEB;
+	else if (b[0]=='m' && b[1]=='a' && b[2]=='r') m = MAR;
+	else if (b[0]=='a' && b[1]=='p' && b[2]=='r') m = APR;
+	else if (b[0]=='m' && b[1]=='a' && b[2]=='y') m = MAY;
+	else if (b[0]=='j' && b[1]=='u' && b[2]=='n') m = JUN;
+	else if (b[0]=='j' && b[1]=='u' && b[2]=='l') m = JUL;
+	else if (b[0]=='a' && b[1]=='u' && b[2]=='g') m = AUG;
+	else if (b[0]=='s' && b[1]=='e' && b[2]=='p') m = SEP;
+	else if (b[0]=='o' && b[1]=='c' && b[2]=='t') m = OCT;
+	else if (b[0]=='n' && b[1]=='o' && b[2]=='v') m = NOV;
+	else if (b[0]=='d' && b[1]=='e' && b[2]=='c') m = DEC;
+	else {
+		push_errctx("bad month");
+		return -1;
+	}
+	*s += 3;
+
+	return m;
+}
+
+int
+parse_year(char **s)
+{
+	int y;
+
+	/* Need exactly 4 digits, since we only allow years after the Unix Epoch and
+	 * before 2038 (ABIs with 32-bit time_t will break) (this restriction can
+	 * be lifted in the future). */
+	if (!isdigit((*s)[0]) || !isdigit((*s)[1]) ||
+			!isdigit((*s)[2]) || !isdigit((*s)[3])) {
+		push_errctx("bad year: invalid length or contains non digits");
+		return -1;
+	}
+	y = ((*s)[0] - '0') * 1000 +
+		((*s)[1] - '0') *  100 +
+		((*s)[2] - '0') *   10 +
+		((*s)[3] - '0');
+	if (y < 1970 || y >= 2038) {
+		push_errctx("bad year: out of bounds (need 1970 <= y < 2038)");
+		return -1;
+	}
+	*s += 4;
+
+	return y;
+}
+
+int
+parse_sel_constraint(struct sel_constraint *head, char *s, int (*str2num)(char**))
 {
 	char *tok1, *tok2;
 	struct sel_constraint **sc;
@@ -242,7 +305,8 @@ parse_sel_constraint(struct sel_constraint *head, char *s, int (*str2num)(char*)
 	sc = &head;
 	if (strchr(s, '*')) {
 		if (strlen(s) > 1) {
-			error("invalid use of wildcard");
+			push_errctx("invalid use of wildcard");
+			return -1;
 		}
 		(*sc)->type = SEL_WILD;
 	} else {
@@ -255,68 +319,83 @@ parse_sel_constraint(struct sel_constraint *head, char *s, int (*str2num)(char*)
 			tok1 = nexttok(&tok2, '-');
 			if (tok2) {
 				(*sc)->type = SEL_SPAN;
-				(*sc)->span.begin = str2num(tok1);
-				(*sc)->span.end = str2num(tok2);
+				if (((*sc)->span.begin = str2num(&tok1)) < 0) return -1;
+				if (((*sc)->span.end = str2num(&tok2)) < 0) return -1;
 				if ((*sc)->span.end <= (*sc)->span.begin) {
-					error("invalid range");
+					push_errctx("invalid range");
+					return -1;
 				}
 			} else {
 				(*sc)->type = SEL_AT;
-				(*sc)->at = str2num(tok1);
+				if (((*sc)->at = str2num(&tok1)) < 0) return -1;
 			}
 			sc = &(*sc)->next;
 		}
 	}
+
+	return 0;
 }
 
-void
-parse_sel_duration(struct selector *sel, char *s)
+int
+parse_duration(long *dur, char *s)
 {
-	char *c;
-	long l, dur, scale;
+	char last;
+	long sign, l, scale;
 
-	dur = 0;
+	*dur = 0;
+	sign = 1;
+	l = 0;
 	scale = 1;
-	for (c = s; *c; ++c) {
-		if (!isdigit(*c)) {
-			switch (*c) {
-			case 'w':
-				scale *= 7;
-			case 'd':
-				scale *= 24;
-			case 'h':
-				scale *= 60;
-			case 'm':
-				if (c == s) {
-					error("bad duration: empty component");
-				}
-				l = strtol(s, NULL, 10);
-				if (l < 0) {
-					error("bad duration: negative");
-				}
-				if (l > LONG_MAX / scale) {
-					error("bad duration: too big");
-				}
-				l *= scale;
-				if (dur > LONG_MAX - l) {
-					error("bad duration: too big");
-				}
-				dur += l;
-				scale = 1;
-				s = c + 1;
-				break;
-			default:
-				error("bad duration: invalid character");
+	for (last = '\0'; s[0] != '\0'; ++s) {
+		switch (last = s[0]) {
+		case '0': case '1': case '2': case '3': case '4':
+		case '5': case '6': case '7': case '8': case '9':
+			if (l > (LONG_MAX - (s[0]-'0')) / 10) {
+				push_errctx("bad duration: out of bounds");
+				return -1;
 			}
+			l = l*10 + (s[0]-'0');
+			break;
+		case 'w': scale *= 7;
+		case 'd': scale *= 24;
+		case 'h': scale *= 60;
+		case 'm':
+			if (l > (LONG_MAX) / scale) {
+				push_errctx("bad duration: out of bounds");
+				return -1;
+			}
+			l *= sign * scale;
+			if ((l > 0 && *dur > LONG_MAX - l) ||
+					(l < 0 && *dur < LONG_MIN - l)) {
+				push_errctx("bad duration: out of bounds");
+				return -1;
+			}
+			*dur += l;
+			sign = 1;
+			l = 0;
+			scale = 1;
+			break;
+		case '-':
+			if (sign == 1) {
+				sign = -1;
+				break;
+			}
+			/* FALLTHROUGH */
+		default:
+			push_errctx("bad duration: invalid character");
+			return -1;
 		}
 	}
-	if (*s != '\0') {
-		error("bad duration: missing unit");
+	/* last == '\0' is OK: it means empty duration. */
+	if (!strchr("wdhm", last)) {
+		push_errctx("bad duration: missing unit");
+		return -1;
 	}
-	sel->dur = dur;
+
+	return 0;
 }
 
-void
+int
 parse_selector(struct selector *sel, char *s)
 {
 	char *tok;
@@ -325,90 +404,118 @@ parse_selector(struct selector *sel, char *s)
 
 	skipws(&s);
 	tok = nexttok(&s, ' ');
-	parse_sel_constraint(&sel->t, tok, time2num);
+	if (parse_sel_constraint(&sel->min, tok, parse_minutes) < 0) return -1;
 
 	skipws(&s);
 	tok = nexttok(&s, ' ');
-	parse_sel_constraint(&sel->dow, tok, dow2num);
+	if (parse_sel_constraint(&sel->hour, tok, parse_hours) < 0) return -1;
 
 	skipws(&s);
 	tok = nexttok(&s, ' ');
-	parse_sel_constraint(&sel->dom, tok, dom2num);
+	if (parse_sel_constraint(&sel->dow, tok, parse_dow) < 0) return -1;
 
 	skipws(&s);
 	tok = nexttok(&s, ' ');
-	parse_sel_constraint(&sel->m, tok, month2num);
+	if (parse_sel_constraint(&sel->dom, tok, parse_dom) < 0) return -1;
 
 	skipws(&s);
 	tok = nexttok(&s, ' ');
-	parse_sel_constraint(&sel->y, tok, year2num);
+	if (parse_sel_constraint(&sel->month, tok, parse_month) < 0) return -1;
 
 	skipws(&s);
 	tok = nexttok(&s, ' ');
-	parse_sel_duration(sel, tok);
+	if (parse_sel_constraint(&sel->year, tok, parse_year) < 0) return -1;
+
+	skipws(&s);
+	tok = nexttok(&s, '\0');
+	if (parse_duration(&sel->dur, tok) < 0) return -1;
+	if (sel->dur < 0) {
+		push_errctx("bad duration: must be nonnegative");
+		return -1;
+	}
+
+	return 0;
 }
 
-void
+int
 parse_entries(struct entry **entry)
 {
-	char *line, *s, *tok;
+	char *line, *s;
 	size_t len;
+	long linecnt;
 	struct selector **sel;
 
 	*entry = NULL;
 	line = NULL;
 	len = 0;
+	linecnt = 0;
 	sel = NULL;
 	while (getline(&line, &len, stdin) != -1) {
 		assert(len > 0);
+		++linecnt;
 		s = line;
 		stripws(&s);
-		if (*s == '#' || *s == '\0') {
+		if (s[0] == '#' || s[0] == '\0') {
 			/* ignore line comment and empty line */
 			continue;
 		}
-		if (*s != '@') { /* new entry */
+		if (s[0] != '@') { /* new entry */
 			*entry = safemalloc(sizeof **entry);
-			(*entry)->desc = NULL;
 			(*entry)->sel = NULL;
 			(*entry)->next = NULL;
+			(*entry)->text = safemalloc(strlen(s)+1);
+			strcpy((*entry)->text, s);
 			sel = &(*entry)->sel;
-			tok = nexttok(&s, ':');
-			(*entry)->title = safemalloc(strlen(tok)+1);
-			strcpy((*entry)->title, tok);
-			tok = nexttok(&s, ':');
-			if (tok) {
-				(*entry)->desc = safemalloc(strlen(tok)+1);
-				strcpy((*entry)->desc, tok);
-			}
 			entry = &(*entry)->next;
 		} else { /* selector for prev entry */
 			if (sel == NULL) {
-				error("selector without title");
+				push_errctx("selector without title");
+				push_errctx_linecnt(linecnt);
+				free(line);
+				return -1;
 			}
 			*sel = safemalloc(sizeof **sel);
 			(*sel)->next = NULL;
-			parse_selector(*sel, s);
+			if (parse_selector(*sel, s) < 0) {
+				push_errctx_linecnt(linecnt);
+				free(line);
+				return -1;
+			}
 			sel = &(*sel)->next;
 		}
 	}
+
+	free(line);
+	return 0;
 }
 
-void
-pack()
-{
-}
+/* time_t */
+/* parse_instant(char *s) */
+/* { */
+	/* struct tm tm; */
+	/* int mins, sign; */
+	/* long dur; */
 
-void
-print_timeline(void)
-{
-	int i;
-	printf("    ");
-	for (i = TIMELINE_START; i <= TIMELINE_STOP; ++i) {
-		printf("%02d      ", i);
-	}
-	printf("\n");
-}
+	/* tm.tm_sec = 0; */
+	/* mins = time2num(&s); */
+	/* tm.tm_min = mins % 60; */
+	/* tm.tm_hour = mins / 60; */
+	/* tm.tm_mday = dom2num(&s); */
+	/* tm.tm_mon = month2num(&s); */
+	/* tm.tm_year = year2num(&s); */
+	/* [> tm_wday and tm_yday ignored by mktime. <] */
+	/* [> Negative isdst means mktime figures it out. <] */
+	/* tm.tm_isdst = -1; */
+
+	/* if (s[0] != '\0') { */
+		/* if      (s[0] == '+') sign = 1; */
+		/* else if (s[0] == '-') sign = -1; */
+		/* else errexit(""); */
+		/* dur = parse_duration(s+1); */
+	/* } */
+
+	/* return mktime(&tm); */
+/* } */
 
 void
 print_constraint(struct sel_constraint *sc)
@@ -432,42 +539,50 @@ print_constraint(struct sel_constraint *sc)
 }
 
 void
-print_entry(struct entry *entry)
+print_entries(struct entry *entry)
 {
 	struct selector *sel;
 
 	for (; entry; entry = entry->next) {
-		printf("title: %s\n", entry->title);
-		printf("desc: %s\n", entry->desc);
+		printf("%s\n", entry->text);
 		for (sel = entry->sel; sel; sel = sel->next) {
 			printf("@");
-			printf("\n\ttime: ");
-			print_constraint(&sel->t);
+			printf("\n\tmins: ");
+			print_constraint(&sel->min);
+			printf("\n\thours: ");
+			print_constraint(&sel->hour);
 			printf("\n\tdow: ");
 			print_constraint(&sel->dow);
 			printf("\n\tdom: ");
 			print_constraint(&sel->dom);
 			printf("\n\tmonth: ");
-			print_constraint(&sel->m);
+			print_constraint(&sel->month);
 			printf("\n\tyear: ");
-			print_constraint(&sel->y);
+			print_constraint(&sel->year);
 			printf("\n\tdur: %ld\n", sel->dur);
 		}
 	}
 }
 
 int
-main(void)
+main(int argc, char *argv[])
 {
+	int opt;
 	struct entry *entry;
-	time_t t = time(NULL);
+	time_t begin, end;
 
-	parse_entries(&entry);
-	/* for (day = Mo; day <= Fr; ++day) {
-		pack(&bins[day], crs, day);
-	} */
-	/* print_timeline(); */
-	print_entry(entry);
+	while ((opt = getopt(argc, argv, "")) != -1) {
+		switch (opt) {
+		default: /* '?' */
+			fprintf(stderr, "Usage: %s TODO", argv[0]);
+			exit(1);
+		}
+	}
+
+	if (parse_entries(&entry) < 0) {
+		errexit(concat_errctx());
+	}
+	print_entries(entry);
 
 	return 0;
 }
