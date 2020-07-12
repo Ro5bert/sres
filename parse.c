@@ -1,116 +1,13 @@
 
-#include <stdio.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
 #include <ctype.h>
 #include <assert.h>
-#include <string.h>
 #include <limits.h>
-#include <time.h>
-#include <unistd.h>
+#include "sres.h"
 
-enum dow {
-	SU, MO, TU, WE, TH, FR, SA
-};
-
-enum month {
-	JAN, FEB, MAR, APR, MAY, JUN,
-	JUL, AUG, SEP, OCT, NOV, DEC
-};
-
-enum sel_constraint_type {
-	SEL_AT, SEL_SPAN, SEL_WILD
-};
-
-struct sel_constraint {
-	enum sel_constraint_type type;
-	union {
-		int at;
-		struct {
-			int begin, end;
-		} span;
-	};
-	struct sel_constraint *next;
-};
-
-struct selector {
-	struct sel_constraint min, hour, dow, dom, month, year;
-	long dur;
-	struct selector *next;
-};
-
-struct entry {
-	char *text;
-	struct selector *sel;
-	struct entry *next;
-};
-
-struct entry_iter {
-	struct entry *entry;
-};
-
-void
-errexit(char *msg)
-{
-	fprintf(stderr, "error: %s\n", msg);
-	exit(1);
-}
-
-void *
-safemalloc(size_t n)
-{
-	void *ptr;
-
-	if ((ptr = malloc(n)) == NULL) {
-		errexit("out of memory");
-	}
-	return ptr;
-}
-
-#define ERRCTX_LEN 16
-static char const *errctx[ERRCTX_LEN];
-static int errctxi = 0;
-#define ERRCTX_LINECNT_LEN 32
-static char errctx_linecnt[ERRCTX_LINECNT_LEN];
-
-void
-push_errctx(char const *msg)
-{
-	if (errctxi < ERRCTX_LEN) errctx[errctxi++] = msg;
-}
-
-void
-push_errctx_linecnt(long linecnt)
-{
-	snprintf(errctx_linecnt, ERRCTX_LINECNT_LEN, "line %ld", linecnt);
-	push_errctx(errctx_linecnt);
-}
-
-char *
-concat_errctx()
-{
-	char *s;
-	size_t slen, offs, need;
-
-	for (s = NULL, offs = 0, slen = 64; errctxi; slen *= 2) {
-		if (!(s = realloc(s, slen))) errexit("out of memory");
-		for (; errctxi; --errctxi) {
-			need = strlen(errctx[errctxi-1])+2;
-			if (need > slen - offs) break; /* Double buffer size. */
-			memcpy(&s[offs], errctx[errctxi-1], need-2);
-			offs += need-2;
-			if (errctxi > 1) {
-				s[offs++] = ':';
-				s[offs++] = ' ';
-			} else {
-				s[offs++] = '\0';
-			}
-		}
-	}
-
-	return s;
-}
-
-char *
+static char *
 nexttok(char **s, char delim)
 {
 	char *tok;
@@ -129,14 +26,14 @@ nexttok(char **s, char delim)
 	return tok;
 }
 
-void
+static void
 skipws(char **s) {
 	while (isspace(**s)) {
 		++*s;
 	}
 }
 
-void
+static void
 stripws(char **s)
 {
 	char *end;
@@ -150,7 +47,7 @@ stripws(char **s)
 	}
 }
 
-int
+static int
 parse_minutes(char **s)
 {
 	int m;
@@ -169,7 +66,7 @@ parse_minutes(char **s)
 	return m;
 }
 
-int
+static int
 parse_hours(char **s)
 {
 	int h;
@@ -188,7 +85,7 @@ parse_hours(char **s)
 	return h;
 }
 
-int
+static int
 parse_dow(char **s)
 {
 	int dow;
@@ -216,7 +113,7 @@ parse_dow(char **s)
 	return dow;
 }
 
-int
+static int
 parse_dom(char **s)
 {
 	int dom;
@@ -230,12 +127,13 @@ parse_dom(char **s)
 		push_errctx("bad day of month: out of bounds (need 1 <= dom <= 31)");
 		return -1;
 	}
+	dom -= 1; /* Make dom start at 0 like every other contraint. */
 	*s += 2;
 
 	return dom;
 }
 
-int
+static int
 parse_month(char **s)
 {
 	int m;
@@ -269,7 +167,7 @@ parse_month(char **s)
 	return m;
 }
 
-int
+static int
 parse_year(char **s)
 {
 	int y;
@@ -295,48 +193,48 @@ parse_year(char **s)
 	return y;
 }
 
-int
-parse_sel_constraint(struct sel_constraint *head, char *s, int (*str2num)(char**))
+static int
+parse_constraint(
+		struct constraint **arr, int *len,
+		char *s, int (*str2num)(char**))
 {
 	char *tok1, *tok2;
-	struct sel_constraint **sc;
+	int cap;
 
-	head->next = NULL;
-	sc = &head;
 	if (strchr(s, '*')) {
 		if (strlen(s) > 1) {
 			push_errctx("invalid use of wildcard");
 			return -1;
 		}
-		(*sc)->type = SEL_WILD;
+		*arr = malloc_or_exit(sizeof **arr);
+		*len = 1;
+		(*arr)[0].begin = (*arr)[0].end = -1;
 	} else {
-		while (s) {
-			if (*sc == NULL) {
-				*sc = safemalloc(sizeof **sc);
-				(*sc)->next = NULL;
+		*arr = malloc_or_exit(4 * sizeof **arr);
+		cap = 4;
+		for (*len = 0; s; ++*len) {
+			if (*len == cap) {
+				*arr = realloc_or_exit(*arr, cap *= 2);
 			}
 			tok2 = nexttok(&s, ',');
 			tok1 = nexttok(&tok2, '-');
-			if (tok2) {
-				(*sc)->type = SEL_SPAN;
-				if (((*sc)->span.begin = str2num(&tok1)) < 0) return -1;
-				if (((*sc)->span.end = str2num(&tok2)) < 0) return -1;
-				if ((*sc)->span.end <= (*sc)->span.begin) {
+			if (((*arr)[*len].begin = str2num(&tok1)) < 0) return -1;
+			if (tok2) { /* The constraint is a range. */
+				if (((*arr)[*len].end = str2num(&tok2)) < 0) return -1;
+				if ((*arr)[*len].end <= (*arr)[*len].begin) {
 					push_errctx("invalid range");
 					return -1;
 				}
-			} else {
-				(*sc)->type = SEL_AT;
-				if (((*sc)->at = str2num(&tok1)) < 0) return -1;
+			} else { /* The constraint is a single value. */
+				(*arr)[*len].end = (*arr)[*len].begin;
 			}
-			sc = &(*sc)->next;
 		}
 	}
 
 	return 0;
 }
 
-int
+static int
 parse_duration(long *dur, char *s)
 {
 	char last;
@@ -395,8 +293,8 @@ parse_duration(long *dur, char *s)
 	return 0;
 }
 
-int
-parse_selector(struct selector *sel, char *s)
+static int
+parse_constraints(struct entry *entry, char *s)
 {
 	char *tok;
 
@@ -404,32 +302,38 @@ parse_selector(struct selector *sel, char *s)
 
 	skipws(&s);
 	tok = nexttok(&s, ' ');
-	if (parse_sel_constraint(&sel->min, tok, parse_minutes) < 0) return -1;
+	if (parse_constraint(&entry->min, &entry->minl, tok, parse_minutes) < 0)
+		return -1;
 
 	skipws(&s);
 	tok = nexttok(&s, ' ');
-	if (parse_sel_constraint(&sel->hour, tok, parse_hours) < 0) return -1;
+	if (parse_constraint(&entry->hour, &entry->hourl, tok, parse_hours) < 0)
+		return -1;
 
 	skipws(&s);
 	tok = nexttok(&s, ' ');
-	if (parse_sel_constraint(&sel->dow, tok, parse_dow) < 0) return -1;
+	if (parse_constraint(&entry->dow, &entry->dowl, tok, parse_dow) < 0)
+		return -1;
 
 	skipws(&s);
 	tok = nexttok(&s, ' ');
-	if (parse_sel_constraint(&sel->dom, tok, parse_dom) < 0) return -1;
+	if (parse_constraint(&entry->dom, &entry->doml, tok, parse_dom) < 0)
+		return -1;
 
 	skipws(&s);
 	tok = nexttok(&s, ' ');
-	if (parse_sel_constraint(&sel->month, tok, parse_month) < 0) return -1;
+	if (parse_constraint(&entry->month, &entry->monthl, tok, parse_month) < 0)
+		return -1;
 
 	skipws(&s);
 	tok = nexttok(&s, ' ');
-	if (parse_sel_constraint(&sel->year, tok, parse_year) < 0) return -1;
+	if (parse_constraint(&entry->year, &entry->yearl, tok, parse_year) < 0)
+		return -1;
 
 	skipws(&s);
 	tok = nexttok(&s, '\0');
-	if (parse_duration(&sel->dur, tok) < 0) return -1;
-	if (sel->dur < 0) {
+	if (parse_duration(&entry->dur, tok) < 0) return -1;
+	if (entry->dur < 0) {
 		push_errctx("bad duration: must be nonnegative");
 		return -1;
 	}
@@ -443,45 +347,50 @@ parse_entries(struct entry **entry)
 	char *line, *s;
 	size_t len;
 	long linecnt;
-	struct selector **sel;
 
 	*entry = NULL;
 	line = NULL;
 	len = 0;
 	linecnt = 0;
-	sel = NULL;
 	while (getline(&line, &len, stdin) != -1) {
 		assert(len > 0);
 		++linecnt;
 		s = line;
 		stripws(&s);
 		if (s[0] == '#' || s[0] == '\0') {
-			/* ignore line comment and empty line */
+			/* Ignore line comments and empty lines. */
 			continue;
 		}
 		if (s[0] != '@') { /* new entry */
-			*entry = safemalloc(sizeof **entry);
-			(*entry)->sel = NULL;
+			if (*entry != NULL) {
+				/* This happens for every entry except the first. */
+				entry = &(*entry)->next;
+			}
+			*entry = malloc_or_exit(sizeof **entry);
 			(*entry)->next = NULL;
-			(*entry)->text = safemalloc(strlen(s)+1);
+			(*entry)->dur = -1;
+			(*entry)->text = malloc_or_exit(strlen(s)+1);
 			strcpy((*entry)->text, s);
-			sel = &(*entry)->sel;
-			entry = &(*entry)->next;
 		} else { /* selector for prev entry */
-			if (sel == NULL) {
-				push_errctx("selector without title");
+			if (*entry == NULL) {
+				push_errctx("selector without text");
 				push_errctx_linecnt(linecnt);
 				free(line);
 				return -1;
 			}
-			*sel = safemalloc(sizeof **sel);
-			(*sel)->next = NULL;
-			if (parse_selector(*sel, s) < 0) {
+			/* dur >= 0 means the entry is already populated, so we need to
+			 * allocate a new one. */
+			if ((*entry)->dur >= 0) {
+				(*entry)->next = malloc_or_exit(sizeof **entry);
+				(*entry)->next->next = NULL;
+				(*entry)->next->text = (*entry)->text;
+				entry = &(*entry)->next;
+			}
+			if (parse_constraints(*entry, s) < 0) {
 				push_errctx_linecnt(linecnt);
 				free(line);
 				return -1;
 			}
-			sel = &(*sel)->next;
 		}
 	}
 
@@ -489,100 +398,4 @@ parse_entries(struct entry **entry)
 	return 0;
 }
 
-/* time_t */
-/* parse_instant(char *s) */
-/* { */
-	/* struct tm tm; */
-	/* int mins, sign; */
-	/* long dur; */
-
-	/* tm.tm_sec = 0; */
-	/* mins = time2num(&s); */
-	/* tm.tm_min = mins % 60; */
-	/* tm.tm_hour = mins / 60; */
-	/* tm.tm_mday = dom2num(&s); */
-	/* tm.tm_mon = month2num(&s); */
-	/* tm.tm_year = year2num(&s); */
-	/* [> tm_wday and tm_yday ignored by mktime. <] */
-	/* [> Negative isdst means mktime figures it out. <] */
-	/* tm.tm_isdst = -1; */
-
-	/* if (s[0] != '\0') { */
-		/* if      (s[0] == '+') sign = 1; */
-		/* else if (s[0] == '-') sign = -1; */
-		/* else errexit(""); */
-		/* dur = parse_duration(s+1); */
-	/* } */
-
-	/* return mktime(&tm); */
-/* } */
-
-void
-print_constraint(struct sel_constraint *sc)
-{
-	while (sc) {
-		switch (sc->type) {
-		case SEL_WILD:
-			printf("*");
-			break;
-		case SEL_AT:
-			printf("%d", sc->at);
-			break;
-		case SEL_SPAN:
-			printf("%d-%d", sc->span.begin, sc->span.end);
-			break;
-		}
-		if ((sc = sc->next)) {
-			printf(",");
-		}
-	}
-}
-
-void
-print_entries(struct entry *entry)
-{
-	struct selector *sel;
-
-	for (; entry; entry = entry->next) {
-		printf("%s\n", entry->text);
-		for (sel = entry->sel; sel; sel = sel->next) {
-			printf("@");
-			printf("\n\tmins: ");
-			print_constraint(&sel->min);
-			printf("\n\thours: ");
-			print_constraint(&sel->hour);
-			printf("\n\tdow: ");
-			print_constraint(&sel->dow);
-			printf("\n\tdom: ");
-			print_constraint(&sel->dom);
-			printf("\n\tmonth: ");
-			print_constraint(&sel->month);
-			printf("\n\tyear: ");
-			print_constraint(&sel->year);
-			printf("\n\tdur: %ld\n", sel->dur);
-		}
-	}
-}
-
-int
-main(int argc, char *argv[])
-{
-	int opt;
-	struct entry *entry;
-	time_t begin, end;
-
-	while ((opt = getopt(argc, argv, "")) != -1) {
-		switch (opt) {
-		default: /* '?' */
-			fprintf(stderr, "Usage: %s TODO", argv[0]);
-			exit(1);
-		}
-	}
-
-	if (parse_entries(&entry) < 0) {
-		errexit(concat_errctx());
-	}
-	print_entries(entry);
-
-	return 0;
-}
+/* TODO make parse_xxx return boolean values instead of -1 */

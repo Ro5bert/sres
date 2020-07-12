@@ -1,6 +1,6 @@
-main: main.c
-	@gcc -Wall -o main main.c
+sres: sres.c
+	@gcc -Wall -o sres sres.c parse.c output.c util.c
 
 .PHONY: clean
 clean:
-	rm main
+	rm sres
