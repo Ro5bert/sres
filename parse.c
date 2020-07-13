@@ -422,6 +422,8 @@ parse_endpoint(struct tm *tm, char *s)
 			return false;
 		}
 		tm->tm_min += dur;
+	} else if (s[0] != '\0') {
+		return false;
 	}
 
 	return true;
