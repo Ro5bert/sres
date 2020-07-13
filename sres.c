@@ -96,6 +96,10 @@ cons_satisfies(int val, struct constraint *cons, int len)
 	return false;
 }
 
+/* iter_calc_time sets i->curr and i->dow to the values described by the min,
+ * hour, dom, month, and year fields of the iterator (using locale
+ * information). If the fields do not describe a valid time, or if the inferred
+ * DoW is invalid, i->curr is set to -1. */
 void
 iter_calc_time(struct entry_iter *i)
 {
@@ -112,7 +116,8 @@ iter_calc_time(struct entry_iter *i)
 	/* At this point, mktime could have normalized the fields of tm such
 	 * that the described time is invalid (does not satisfy the
 	 * constraints). Also, we need to make sure the weekday, which mktime
-	 * infers from the other fields, satisfies its constraints. */
+	 * infers from the other fields, satisfies its constraints and set dow if
+	 * so. */
 	if (!cons_satisfies(tm.tm_wday, i->entry->dow, i->entry->dowl) ||
 			tm.tm_min != i->min ||
 			tm.tm_hour != i->hour ||
@@ -125,6 +130,18 @@ iter_calc_time(struct entry_iter *i)
 	}
 }
 
+/* iter_next sets the min, hour, dow, dom, month, and year fields of the
+ * iterator to the next valid time less than end, and sets i->curr to the Unix
+ * time corresponding to this assignment. If no such time exists, i->curr is
+ * set to -1. iter_next returns true if and only if a valid time was found.
+ *
+ * The implementation ensures that iterating over all events in a given time
+ * span takes time proportional to the number of events in that time span. The
+ * naive implementation would be to iterate minute-by-minute and repeatedly
+ * check if the contraints of an entry satisfies each minute, but this would
+ * take time proportional to the size of the time span (i.e., inefficient for
+ * large time spans, especially those containing a relatively small number of
+ * events). */
 bool
 iter_next(struct entry_iter *i)
 {
@@ -139,16 +156,12 @@ iter_next(struct entry_iter *i)
 						if (!cons_next(&i->year, e->year, e->yearl, 2037)) {
 							return false;
 						}
-						i->month = 0;
 						assert(cons_next(&i->month, e->month, e->monthl, DEC));
 					}
-					i->dom = 0;
 					assert(cons_next(&i->dom, e->dom, e->doml, 30));
 				}
-				i->hour = 0;
 				assert(cons_next(&i->hour, e->hour, e->hourl, 23));
 			}
-			i->min = 0;
 			assert(cons_next(&i->min, e->min, e->minl, 59));
 		}
 	}
@@ -157,33 +170,6 @@ iter_next(struct entry_iter *i)
 		return false;
 	}
 
-	return true;
-}
-
-bool
-iter_init_helper(
-		bool *allow_any,
-		int *field,
-		struct constraint *cons,
-		int len,
-		int max,
-		int begin
-)
-{
-	if (*allow_any) {
-		*field = 0;
-		if (!cons_satisfies(0, cons, len)) {
-			assert(cons_next(field, cons, len, max));
-		}
-	} else {
-		*field = begin;
-		if (!cons_satisfies(begin, cons, len)) {
-			if (!cons_next(field, cons, len, max)) {
-				return false;
-			}
-			*allow_any = true;
-		}
-	}
 	return true;
 }
 
@@ -197,27 +183,38 @@ iter_init(struct entry_iter *i, struct tm *begin)
 	e = i->entry; /* For brevity. */
 	i->curr = -1;
 
-	if (!iter_init_helper(
-			&allow_any, &i->year, e->year,
-			e->yearl, 2037, begin->tm_year + 1900
-	)) return false;
-	if (!iter_init_helper(
-			&allow_any, &i->month, e->month,
-			e->monthl, DEC, begin->tm_mon
-	)) return false;
-	if (!iter_init_helper(
-			&allow_any, &i->dom, e->dom,
-			e->doml, 30, begin->tm_mday - 1
-	)) return false;
-	if (!iter_init_helper(
-			&allow_any, &i->hour, e->hour,
-			e->hourl, 23, begin->tm_hour
-	)) return false;
-	if (!iter_init_helper(
-			&allow_any, &i->min, e->min,
-			e->minl, 59, begin->tm_min
-	)) return false;
-
+	i->year = begin->tm_year + 1900 - 1;
+	while (cons_next(&i->year, e->year, e->yearl, 2037)) {
+		/* If year has been set to a value strictly greater than it needs to be
+		 * set to, the following fields can be set to their smallest value.
+		 * E.g., if the beginning date is 12 July 2020, but the smallest
+		 * permissible year is 2021, then the month needn't be July or greater;
+		 * rather, the month (and the dom, hour, and minute) can be their
+		 * smallest permissible values. This is what allow_any indicates. */
+		allow_any = i->year > begin->tm_year+1900;
+		i->month = (allow_any ? 0 : begin->tm_mon) - 1;
+		while (cons_next(&i->month, e->month, e->monthl, DEC)) {
+			allow_any = allow_any || i->month > begin->tm_mon;
+			i->dom = (allow_any ? 0 : begin->tm_mday-1) - 1;
+			while (cons_next(&i->dom, e->dom, e->doml, 30)) {
+				allow_any = allow_any || i->dom > begin->tm_mday-1;
+				i->hour = (allow_any ? 0 : begin->tm_hour) - 1;
+				while (cons_next(&i->hour, e->hour, e->hourl, 23)) {
+					allow_any = allow_any || i->hour > begin->tm_hour;
+					i->min = (allow_any ? 0 : begin->tm_min) - 1;
+					if (cons_next(&i->min, e->min, e->minl, 59)) {
+						/* We've got a date in the timespan, but it might not
+						 * be valid (weekday might not satsify constraints, for
+						 * example). However, at this point, if this date isn't
+						 * valid we can just use iter_next to advance to the
+						 * next valid date. */
+						goto exit_loop;
+					}
+				}
+			}
+		}
+	}
+exit_loop:
 	iter_calc_time(i);
 	if (i->curr < 0) {
 		return iter_next(i);
@@ -275,20 +272,6 @@ iters_resort(struct entry_iter *iters, int len)
 		iters[i-1] = iters[i];
 		iters[i] = t;
 	}
-}
-
-/* TODO TEMP */
-void
-print_iter(struct entry_iter *iter)
-{
-	printf("skip: %d\n", iter->skip);
-	printf("curr: %ld\n", iter->curr);
-	printf("min: %d\n", iter->min);
-	printf("hour: %d\n", iter->hour);
-	printf("dow: %d\n", iter->dow);
-	printf("dom: %d\n", iter->dom);
-	printf("month: %d\n", iter->month);
-	printf("year: %d\n", iter->year);
 }
 
 int
