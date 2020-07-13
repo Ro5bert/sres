@@ -85,31 +85,31 @@ parse_hours(char **s)
 	return h;
 }
 
-/* TODO make this 3 letters for consistency */
 static int
 parse_dow(char **s)
 {
 	int dow;
-	char b[2];
+	char b[3];
 
-	if ((*s)[0] == '\0' || (*s)[1] == '\0') {
+	if ((*s)[0] == '\0' || (*s)[1] == '\0' || (*s)[2] == '\0') {
 		push_errctx("bad day of week: invalid length");
 		return -1;
 	}
 	b[0] = tolower((*s)[0]);
 	b[1] = tolower((*s)[1]);
-	if      (b[0]=='s' && b[1]=='u') dow = SU;
-	else if (b[0]=='m' && b[1]=='o') dow = MO;
-	else if (b[0]=='t' && b[1]=='u') dow = TU;
-	else if (b[0]=='w' && b[1]=='e') dow = WE;
-	else if (b[0]=='t' && b[1]=='h') dow = TH;
-	else if (b[0]=='f' && b[1]=='r') dow = FR;
-	else if (b[0]=='s' && b[1]=='a') dow = SA;
+	b[2] = tolower((*s)[2]);
+	if      (b[0]=='s' && b[1]=='u' && b[2]=='n') dow = SUN;
+	else if (b[0]=='m' && b[1]=='o' && b[2]=='n') dow = MON;
+	else if (b[0]=='t' && b[1]=='u' && b[2]=='e') dow = TUE;
+	else if (b[0]=='w' && b[1]=='e' && b[2]=='d') dow = WED;
+	else if (b[0]=='t' && b[1]=='h' && b[2]=='u') dow = THU;
+	else if (b[0]=='f' && b[1]=='r' && b[2]=='i') dow = FRI;
+	else if (b[0]=='s' && b[1]=='a' && b[2]=='t') dow = SAT;
 	else {
 		push_errctx("bad day of week");
 		return -1;
 	}
-	*s += 2;
+	*s += 3;
 
 	return dow;
 }

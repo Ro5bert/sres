@@ -10,7 +10,7 @@
 typedef enum {false, true} bool;
 
 enum dow {
-	SU, MO, TU, WE, TH, FR, SA
+	SUN, MON, TUE, WED, THU, FRI, SAT
 };
 
 enum month {
