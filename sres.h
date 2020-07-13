@@ -5,7 +5,6 @@
 #define min(a,b) ((a) < (b) ? (a) : (b))
 #define abs(a) ((a) >= 0 ? (a) : -(a))
 #define inrange(a,l,u) ((l) <= (a) && (a) <= (u))
-#define range_overlap(l0,u0,l1,u1) (inrange(u0,l1,u1) || inrange(u1,l0,u0))
 
 typedef enum {false, true} bool;
 
