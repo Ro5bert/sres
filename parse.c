@@ -85,6 +85,7 @@ parse_hours(char **s)
 	return h;
 }
 
+/* TODO make this 3 letters for consistency */
 static int
 parse_dow(char **s)
 {
@@ -254,6 +255,7 @@ parse_duration(long *dur, char *s)
 			}
 			l = l*10 + (s[0]-'0');
 			break;
+		/* Order of these cases is important! */
 		case 'w': scale *= 7;
 		case 'd': scale *= 24;
 		case 'h': scale *= 60;

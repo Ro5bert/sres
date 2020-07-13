@@ -283,12 +283,22 @@ main(int argc, char **argv)
 	struct entry *entry, *e;
 	struct entry_iter *iters;
 
-	while ((opt = getopt(argc, argv, "")) != -1) {
+	while ((opt = getopt(argc, argv, "f:h")) != -1) {
 		switch (opt) {
-		/* TODO -f option to change output format */
-		/* TODO -c option to control colour */
+		case 'f':
+			fmt = optarg;
+			break;
+		case 'h':
 		default: /* '?' */
-			fprintf(stderr, "Usage: %s TODO", argv[0]);
+			fprintf(stderr,
+				"Usage: %s [-f fmt]\n"
+				"       %s [-f fmt] [begin] <end>\n"
+				"If begin is not provided, it defaults to now.\n"
+				"If end is not provided, it defaults to one day from now.\n"
+				"See the in-source documentation for more info.\n",
+				/* TODO make man page */
+				argv[0], argv[0]
+			);
 			exit(1);
 		}
 	}
@@ -299,12 +309,11 @@ main(int argc, char **argv)
 		errexit("time failed");
 	}
 	localtime_r(&t, &begin);
-	end = t + 60*60*24; /* one day */
+	end = t + 100*60*60*24; /* 100 days */
 
 	if (parse_entries(&entry) < 0) {
 		errexit(concat_errctx());
 	}
-	print_entries(entry);
 	for (n_entries = 0, e = entry; e; e = e->next) {
 		if (e->dur < 0) {
 			continue;
@@ -315,7 +324,7 @@ main(int argc, char **argv)
 		cons_normalize(&e->dom, &e->doml);
 		cons_normalize(&e->month, &e->monthl);
 		cons_normalize(&e->year, &e->yearl);
-		if (++n_entries == INT_MAX) {
+		if (++n_entries == INT_MAX && e->next) {
 			errexit("too many entries");
 		}
 	}
@@ -339,14 +348,14 @@ main(int argc, char **argv)
 	}
 	while (i < n_entries) {
 		if (!iters[i].skip) {
-			/* TODO print event */
-			/* TODO TEMP */
-			printf("%s\n", iters[i].entry->text);
+			if (!print_iter(&iters[i])) {
+				errexit(concat_errctx());
+			}
 		} else {
 			iters[i].skip = false;
 		}
 		if (!iter_next(&iters[i])) {
-			/* We're done with this iterator. */
+			/* This iterator is exhausted. */
 			++i;
 		} else {
 			iters_resort(&iters[i], n_entries-i);

@@ -52,4 +52,5 @@ char *concat_errctx(void);
 int parse_entries(struct entry **entry);
 
 /* output.c */
-void print_entries(struct entry *entry);
+extern char *fmt;
+bool print_iter(struct entry_iter *iter);
