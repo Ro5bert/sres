@@ -52,8 +52,9 @@ concat_errctx(void)
 	char *s;
 	size_t slen, offs, need;
 
-	for (s = NULL, offs = 0, slen = 64; errctxi; --errctxi) {
-		need = strlen(errctx[errctxi-1])+2;
+	for (s = malloc_or_exit(slen = 64), offs = 0; errctxi; --errctxi) {
+		/* Potentially 1 more than we really need, but this is easier. */
+		need = strlen(errctx[errctxi-1]) + 2;
 		while (need > slen - offs) {
 			s = realloc_or_exit(s, slen *= 2);
 		}
