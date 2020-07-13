@@ -1,5 +1,11 @@
-sres: sres.c
-	@gcc -Wall -o sres sres.c parse.c output.c util.c
+
+CC ?= gcc
+CFLAGS ?= -Wall
+
+SOURCES = sres.c parse.c output.c util.c
+
+sres: sres.h $(SOURCES)
+	$(CC) $(CFLAGS) -o $@ $(SOURCES)
 
 .PHONY: clean
 clean:
