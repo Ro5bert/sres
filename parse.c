@@ -400,3 +400,28 @@ parse_entries(struct entry **entry)
 	return true;
 }
 
+bool
+parse_endpoint(struct tm *tm, char *s)
+{
+	long dur;
+
+	/* Format: [HHmmDDMMMyyyy][+dur] */
+	if (s[0] != '+') {
+		tm->tm_sec = 0;
+		if ((tm->tm_hour = parse_hours(&s))   < 0) return false;
+		if ((tm->tm_min  = parse_minutes(&s)) < 0) return false;
+		if ((tm->tm_mday = parse_dom(&s))     < 0) return false;
+		if ((tm->tm_mon  = parse_month(&s))   < 0) return false;
+		if ((tm->tm_year = parse_year(&s))    < 0) return false;
+		tm->tm_isdst = -1;
+	}
+	if (s[0] == '+') {
+		if (!parse_duration(&dur, s+1)) {
+			return false;
+		}
+		tm->tm_min += dur;
+	}
+
+	return true;
+}
+

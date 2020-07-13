@@ -49,6 +49,7 @@ char *concat_errctx(void);
 
 /* parse.c */
 bool parse_entries(struct entry **entry);
+bool parse_endpoint(struct tm *tm, char *s);
 
 /* output.c */
 extern char *fmt;

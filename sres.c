@@ -274,11 +274,28 @@ iters_resort(struct entry_iter *iters, int len)
 	}
 }
 
+void
+print_usage(char *argv0)
+{
+	fprintf(stderr,
+		"Usage: %s [-f fmt]\n"
+		"       %s [-f fmt] [begin] <end>\n"
+		"If begin is not provided, it defaults to now.\n"
+		"If end is not provided, it defaults to one day from now.\n"
+		"Both begin and end have the format [HHmmDDMMMyyyy][+dur].\n"
+		"If the first part of the format is absent, it defaults to now.\n"
+		"If the second part of the format is absent, it defaults to zero.\n"
+		"See the in-source documentation for more info.\n",
+		/* TODO make man page */
+		argv0, argv0
+	);
+}
+
 int
 main(int argc, char **argv)
 {
 	int opt, i, n_entries;
-	struct tm begin;
+	struct tm tm, begin;
 	time_t t, end;
 	struct entry *entry, *e;
 	struct entry_iter *iters;
@@ -290,26 +307,51 @@ main(int argc, char **argv)
 			break;
 		case 'h':
 		default: /* '?' */
-			fprintf(stderr,
-				"Usage: %s [-f fmt]\n"
-				"       %s [-f fmt] [begin] <end>\n"
-				"If begin is not provided, it defaults to now.\n"
-				"If end is not provided, it defaults to one day from now.\n"
-				"See the in-source documentation for more info.\n",
-				/* TODO make man page */
-				argv[0], argv[0]
-			);
+			print_usage(argv[0]);
 			exit(1);
 		}
 	}
-	
-	/* TODO TEMP */
-	t = time(NULL);
-	if (t < 0) {
-		errexit("time failed");
+
+	/* TODO Note we don't check that the user hasn't entered in some strange
+	 * time such as Feb 31. In such cases, mktime would normalize the time and
+	 * the user might get unexpected results. */
+	if (time(&t) < 0) {
+		errexit("could not determine current time");
 	}
-	localtime_r(&t, &begin);
-	end = t + 100*60*60*24; /* 100 days */
+	if (localtime_r(&t, &tm) == NULL) {
+		errexit("could not decompose current time");
+	}
+	begin = tm;
+	switch (argc - optind) {
+	case 2:
+		if (!parse_endpoint(&begin, argv[optind++])) {
+			push_errctx("could not parse begin time");
+			errexit(concat_errctx());
+		}
+		if (mktime(&begin) < 0) { /* Normalize. */
+			errexit("could not calculate begin time");
+		}
+		/* FALLTHROUGH */
+	case 1:
+		if (!parse_endpoint(&tm, argv[optind])) {
+			push_errctx("could not parse end time");
+			errexit(concat_errctx());
+		}
+		if ((end = mktime(&tm)) < 0) {
+			errexit("could not calculate end time");
+		}
+		break;
+	case 0:
+		tm.tm_mday += 1;
+		if ((end = mktime(&tm)) < 0) {
+			errexit("could not calculate end time");
+		}
+		break;
+	default:
+		fprintf(stderr, "too many arguments");
+		print_usage(argv[0]);
+		exit(1);
+	}
 
 	if (!parse_entries(&entry)) {
 		errexit(concat_errctx());
