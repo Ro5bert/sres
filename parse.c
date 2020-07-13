@@ -194,7 +194,7 @@ parse_year(char **s)
 	return y;
 }
 
-static int
+static bool
 parse_constraint(
 		struct constraint **arr, int *len,
 		char *s, int (*str2num)(char**))
@@ -205,7 +205,7 @@ parse_constraint(
 	if (strchr(s, '*')) {
 		if (strlen(s) > 1) {
 			push_errctx("invalid use of wildcard");
-			return -1;
+			return false;
 		}
 		*arr = malloc_or_exit(sizeof **arr);
 		*len = 1;
@@ -219,12 +219,12 @@ parse_constraint(
 			}
 			tok2 = nexttok(&s, ',');
 			tok1 = nexttok(&tok2, '-');
-			if (((*arr)[*len].begin = str2num(&tok1)) < 0) return -1;
+			if (((*arr)[*len].begin = str2num(&tok1)) < 0) return false;
 			if (tok2) { /* The constraint is a range. */
-				if (((*arr)[*len].end = str2num(&tok2)) < 0) return -1;
+				if (((*arr)[*len].end = str2num(&tok2)) < 0) return false;
 				if ((*arr)[*len].end <= (*arr)[*len].begin) {
 					push_errctx("invalid range");
-					return -1;
+					return false;
 				}
 			} else { /* The constraint is a single value. */
 				(*arr)[*len].end = (*arr)[*len].begin;
@@ -232,10 +232,10 @@ parse_constraint(
 		}
 	}
 
-	return 0;
+	return true;
 }
 
-static int
+static bool
 parse_duration(long *dur, char *s)
 {
 	char last;
@@ -251,7 +251,7 @@ parse_duration(long *dur, char *s)
 		case '5': case '6': case '7': case '8': case '9':
 			if (l > (LONG_MAX - (s[0]-'0')) / 10) {
 				push_errctx("bad duration: out of bounds");
-				return -1;
+				return false;
 			}
 			l = l*10 + (s[0]-'0');
 			break;
@@ -262,13 +262,13 @@ parse_duration(long *dur, char *s)
 		case 'm':
 			if (l > (LONG_MAX) / scale) {
 				push_errctx("bad duration: out of bounds");
-				return -1;
+				return false;
 			}
 			l *= sign * scale;
 			if ((l > 0 && *dur > LONG_MAX - l) ||
 					(l < 0 && *dur < LONG_MIN - l)) {
 				push_errctx("bad duration: out of bounds");
-				return -1;
+				return false;
 			}
 			*dur += l;
 			sign = 1;
@@ -283,19 +283,19 @@ parse_duration(long *dur, char *s)
 			/* FALLTHROUGH */
 		default:
 			push_errctx("bad duration: invalid character");
-			return -1;
+			return false;
 		}
 	}
 	/* last == '\0' is OK: it means empty duration. */
 	if (!strchr("wdhm", last)) {
 		push_errctx("bad duration: missing unit");
-		return -1;
+		return false;
 	}
 
-	return 0;
+	return true;
 }
 
-static int
+static bool
 parse_constraints(struct entry *entry, char *s)
 {
 	char *tok;
@@ -304,46 +304,46 @@ parse_constraints(struct entry *entry, char *s)
 
 	skipws(&s);
 	tok = nexttok(&s, ' ');
-	if (parse_constraint(&entry->min, &entry->minl, tok, parse_minutes) < 0)
-		return -1;
+	if (!parse_constraint(&entry->min, &entry->minl, tok, parse_minutes))
+		return false;
 
 	skipws(&s);
 	tok = nexttok(&s, ' ');
-	if (parse_constraint(&entry->hour, &entry->hourl, tok, parse_hours) < 0)
-		return -1;
+	if (!parse_constraint(&entry->hour, &entry->hourl, tok, parse_hours))
+		return false;
 
 	skipws(&s);
 	tok = nexttok(&s, ' ');
-	if (parse_constraint(&entry->dow, &entry->dowl, tok, parse_dow) < 0)
-		return -1;
+	if (!parse_constraint(&entry->dow, &entry->dowl, tok, parse_dow))
+		return false;
 
 	skipws(&s);
 	tok = nexttok(&s, ' ');
-	if (parse_constraint(&entry->dom, &entry->doml, tok, parse_dom) < 0)
-		return -1;
+	if (!parse_constraint(&entry->dom, &entry->doml, tok, parse_dom))
+		return false;
 
 	skipws(&s);
 	tok = nexttok(&s, ' ');
-	if (parse_constraint(&entry->month, &entry->monthl, tok, parse_month) < 0)
-		return -1;
+	if (!parse_constraint(&entry->month, &entry->monthl, tok, parse_month))
+		return false;
 
 	skipws(&s);
 	tok = nexttok(&s, ' ');
-	if (parse_constraint(&entry->year, &entry->yearl, tok, parse_year) < 0)
-		return -1;
+	if (!parse_constraint(&entry->year, &entry->yearl, tok, parse_year))
+		return false;
 
 	skipws(&s);
 	tok = nexttok(&s, '\0');
-	if (parse_duration(&entry->dur, tok) < 0) return -1;
+	if (!parse_duration(&entry->dur, tok)) return false;
 	if (entry->dur < 0) {
 		push_errctx("bad duration: must be nonnegative");
-		return -1;
+		return false;
 	}
 
-	return 0;
+	return true;
 }
 
-int
+bool
 parse_entries(struct entry **entry)
 {
 	char *line, *s;
@@ -378,7 +378,7 @@ parse_entries(struct entry **entry)
 				push_errctx("selector without text");
 				push_errctx_linecnt(linecnt);
 				free(line);
-				return -1;
+				return false;
 			}
 			/* dur >= 0 means the entry is already populated, so we need to
 			 * allocate a new one. */
@@ -388,16 +388,15 @@ parse_entries(struct entry **entry)
 				(*entry)->next->text = (*entry)->text;
 				entry = &(*entry)->next;
 			}
-			if (parse_constraints(*entry, s) < 0) {
+			if (!parse_constraints(*entry, s)) {
 				push_errctx_linecnt(linecnt);
 				free(line);
-				return -1;
+				return false;
 			}
 		}
 	}
 
 	free(line);
-	return 0;
+	return true;
 }
 
-/* TODO make parse_xxx return boolean values instead of -1 */

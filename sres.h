@@ -48,7 +48,7 @@ void push_errctx_linecnt(long linecnt);
 char *concat_errctx(void);
 
 /* parse.c */
-int parse_entries(struct entry **entry);
+bool parse_entries(struct entry **entry);
 
 /* output.c */
 extern char *fmt;

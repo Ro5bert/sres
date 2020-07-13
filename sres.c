@@ -311,7 +311,7 @@ main(int argc, char **argv)
 	localtime_r(&t, &begin);
 	end = t + 100*60*60*24; /* 100 days */
 
-	if (parse_entries(&entry) < 0) {
+	if (!parse_entries(&entry)) {
 		errexit(concat_errctx());
 	}
 	for (n_entries = 0, e = entry; e; e = e->next) {
