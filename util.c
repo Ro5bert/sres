@@ -8,7 +8,7 @@ void
 errexit(char const *msg)
 {
 	fprintf(stderr, "error: %s\n", msg);
-	exit(1);
+	exit(EXIT_FAILURE);
 }
 
 void *

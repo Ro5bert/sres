@@ -308,7 +308,7 @@ main(int argc, char **argv)
 		case 'h':
 		default: /* '?' */
 			print_usage(argv[0]);
-			exit(1);
+			exit(EXIT_FAILURE);
 		}
 	}
 
@@ -350,7 +350,7 @@ main(int argc, char **argv)
 	default:
 		fprintf(stderr, "too many arguments");
 		print_usage(argv[0]);
-		exit(1);
+		exit(EXIT_FAILURE);
 	}
 
 	if (!parse_entries(&entry)) {
