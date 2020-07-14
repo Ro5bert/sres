@@ -8,8 +8,9 @@ SYNOPSIS
        sres [-f FMT] [BEGIN] END
 
 DESCRIPTION
-       Take  as  input  a  description of events and when they occur, and then
-       output when the events occur within a timespan.
+       Take  a description of events over standard input, and then output when
+       the events occur between BEGIN and END.  BEGIN  defaults  to  now;  END
+       defaults to one day from now.
 
    Events
        Event descriptions are given to sres over standard input in the follow‐
@@ -23,32 +24,32 @@ DESCRIPTION
            Etc...
 
        Each event has a one line description and zero or more "selectors" (the
-       lines beginning with "@").  Each selector consists of seven fields,  as
-       shown  above.  The first six fields describe the start time of an event
+       lines  beginning with "@").  Each selector consists of seven fields, as
+       shown above.  The first six fields describe the start time of an  event
        in a cron-like format, and the last field specifies the duration of the
-       event  associated  with the preceding start time description.  An event
-       with zero selectors never happens; an  event  with  multiple  selectors
-       happens  at  the  times described by each of its selectors, with dupli‐
+       event associated with the preceding start time description.   An  event
+       with  zero  selectors  never  happens; an event with multiple selectors
+       happens at the times described by each of its  selectors,  with  dupli‐
        cates removed.
 
        Here are some examples of selectors:
 
        00 13 tue,fri * jan-apr,sep 1986 3h30m
-              At 1:00 p.m. on Tuesdays and Fridays in  January  through  April
+              At  1:00 p.m.  on  Tuesdays and Fridays in January through April
               and September in 1986 for 3.5 hours.
 
        00-29 08 * 29 feb 2020 -1m1w
-              At  each  of  the  first  30 minutes in the 8th hour of 29 Febu‐
+              At each of the first 30 minutes  in  the  8th hour  of  29 Febu‐
               rary 2020 for 1 minute less than a week.
 
        * * * * * 2030 0m
               At every minute in 2030 for 0 minutes.
 
        54 18 mon 1 apr 2001 2d
-              At 6:54 p.m. on Monday,  1 April 2001  for  2 days.   (This  one
+              At  6:54 p.m.  on  Monday,  1 April 2001  for 2 days.  (This one
               never happens since 1 Apr 2001 is actually a Sunday.)
 
-       To  be  precise, the permissible values for the first six fields are as
+       To be precise, the permissible values for the first six fields  are  as
        follows:
 
        Field           Values
@@ -61,34 +62,31 @@ DESCRIPTION
                        jul, aug, sep, oct, nov, dec
        years           1970, 1971, ..., 2037
 
-       Leading zeros are required where shown above.  Days of week and  months
-       are  case  insensitive.   The restriction on years may be lifted in the
+       Leading  zeros are required where shown above.  Days of week and months
+       are case insensitive.  The restriction on years may be  lifted  in  the
        future.
 
-       In addition, the above values can be listed (using ",") and  put  in  a
+       In  addition,  the  above values can be listed (using ",") and put in a
        range (using "-").
 
-       Durations  are  specified  as a string of one or more undelimited inte‐
-       ger/unit pair components.  The value of the whole duration is  the  sum
-       of  the durations represented by each component.  The valid units are m
-       (minute), h (hour), d (day), and w (week).   While  components  may  be
+       Durations are specified as a string of one or  more  undelimited  inte‐
+       ger/unit  pair  components.  The value of the whole duration is the sum
+       of the durations represented by each component.  The valid units are  m
+       (minute),  h  (hour),  d  (day), and w (week).  While components may be
        negative, the resulting duration must be nonnegative.
 
    Timespan Format (Begin and End Arguments)
-       The  format  of  both  BEGIN and END is [HHmmDDMMMyyyy][+OFFSET].  (The
+       The format of both BEGIN and  END  is  [HHmmDDMMMyyyy][+OFFSET].   (The
        square brackets are not required or valid; they are used here to denote
        that the contents are optional.)  Here, HH stands for the hour (00-23),
-       mm stands for the  minute  (00-59),  DD  stands  for  the  day-of-month
-       (01-31),  MMM  stands  for the abbreviated month name (jan, feb, etc.),
-       yyyy stands for the year (1970-2037), and OFFSET stands for a  duration
-       offset  in  the  same  format  as  durations  for events.  For example,
+       mm  stands  for  the  minute  (00-59),  DD  stands for the day-of-month
+       (01-31), MMM stands for the abbreviated month name  (jan,  feb,  etc.),
+       yyyy  stands for the year (1970-2037), and OFFSET stands for a duration
+       offset in the same  format  as  durations  for  events.   For  example,
        164509nov2008+-1w1d means 6 days before 4:45 p.m. on 9 November 2008.
 
        If the first component of BEGIN/END is omitted, it defaults to the cur‐
        rent time; if the second component is omitted, it defaults to 0m.
-
-       If  BEGIN is omitted entirely, it defaults to the current time.  If END
-       is omitted entirely, it defaults to one day after the current time.
 
    Output Format (-f Option)
        sres prints out event occurrences separated by  newlines.   Each  event

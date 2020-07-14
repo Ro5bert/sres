@@ -6,8 +6,9 @@ sres \- simple recurring event scheduler
 .br
 \fBsres\fR [\-f \fIFMT\fR] [\fIBEGIN\fR] \fIEND\fR
 .SH DESCRIPTION
-Take as input a description of events and when they occur, and then output when
-the events occur within a timespan.
+Take a description of events over standard input, and then output when the
+events occur between \fIBEGIN\fR and \fIEND\fR.
+\fIBEGIN\fR defaults to now; \fIEND\fR defaults to one day from now.
 .SS Events
 Event descriptions are given to sres over standard input in the following
 format:
@@ -101,10 +102,6 @@ For example, 164509nov2008+-1w1d means 6 days before 4:45\ p.m. on
 .PP
 If the first component of \fIBEGIN\fR/\fIEND\fR is omitted, it defaults to the
 current time; if the second component is omitted, it defaults to 0m.
-.PP
-If \fIBEGIN\fR is omitted entirely, it defaults to the current time.
-If \fIEND\fR is omitted entirely, it defaults to one day after the current
-time.
 .SS "Output Format (\-f Option)"
 sres prints out event occurrences separated by newlines.
 Each event occurrence is displayed according to a format specified using the

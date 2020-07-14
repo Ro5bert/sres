@@ -278,15 +278,11 @@ void
 print_usage(char *argv0)
 {
 	fprintf(stderr,
-		"Usage: %s [-f fmt]\n"
-		"       %s [-f fmt] [begin] <end>\n"
-		"If begin is not provided, it defaults to now.\n"
-		"If end is not provided, it defaults to one day from now.\n"
-		"Both begin and end have the format [HHmmDDMMMyyyy][+dur].\n"
-		"If the first part of the format is absent, it defaults to now.\n"
-		"If the second part of the format is absent, it defaults to zero.\n"
-		"See the in-source documentation for more info.\n",
-		/* TODO make man page */
+		"Usage: %s [-f FMT]\n"
+		"       %s [-f FMT] [BEGIN] END\n"
+		"Take a description of events over standard input, and then\n"
+		"output when the events occur between BEGIN and END.\n"
+		"BEGIN defaults to now; END defaults to one day from now.\n",
 		argv0, argv0
 	);
 }
