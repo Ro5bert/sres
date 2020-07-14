@@ -1,0 +1,208 @@
+.TH "SRES" "1" "2020-07-13" "sres" "User Commands"
+.SH NAME
+sres \- simple recurring event scheduler
+.SH SYNOPSIS
+\fBsres\fR [\-f \fIFMT\fR]
+.br
+\fBsres\fR [\-f \fIFMT\fR] [\fIBEGIN\fR] \fIEND\fR
+.SH DESCRIPTION
+Take as input a description of events and when they occur, and then output when
+the events occur within a timespan.
+.SS Events
+Event descriptions are given to sres over standard input in the following
+format:
+.PP
+.in +4n
+.EX
+# A line comment: "#" must be the first non-whitespace character.
+My Event 1
+@ \fIMINS\fR \fIHOURS\fR \fIDAYS-OF-WEEK\fR \fIDAYS-OF-MONTH\fR \fIMONTHS\fR \fIYEARS\fR \fIDURATION\fR
+My Event 2
+@ \fIMINS\fR \fIHOURS\fR \fIDAYS-OF-WEEK\fR \fIDAYS-OF-MONTH\fR \fIMONTHS\fR \fIYEARS\fR \fIDURATION\fR
+Etc...
+.EE
+.in
+.PP
+Each event has a one line description and zero or more "selectors" (the lines
+beginning with\ "@").
+Each selector consists of seven fields, as shown above.
+The first six fields describe the start time of an event in a cron-like format,
+and the last field specifies the duration of the event associated with the
+preceding start time description.
+An event with zero selectors never happens; an event with multiple selectors
+happens at the times described by each of its selectors, with duplicates
+removed.
+.PP
+Here are some examples of selectors:
+.PP
+.TP
+.B "00 13 tue,fri * jan-apr,sep 1986 3h30m"
+At 1:00\ p.m. on Tuesdays and Fridays in January through April and September in
+1986 for 3.5\ hours.
+.TP
+.B "00-29 08 * 29 feb 2020 -1m1w"
+At each of the first 30\ minutes in the 8th\ hour of 29\ Feburary\ 2020 for
+1\ minute less than a week.
+.TP
+.B "* * * * * 2030 0m"
+At every minute in 2030 for 0\ minutes.
+.TP
+.B "54 18 mon 1 apr 2001 2d"
+At 6:54\ p.m. on Monday, 1\ April\ 2001 for 2\ days.
+(This one never happens since 1\ Apr\ 2001 is actually a Sunday.)
+.PP
+To be precise, the permissible values for the first six fields are as follows:
+.PP
+.TS
+tab(;);
+l l
+--
+l l.
+Field;Values
+mins;00, 01, ..., 59
+hours;00, 01, ..., 23
+days-of-week;sun, mon, tue, wed, thu, fri, sat
+days-of-month;01, 02, ..., 31
+months;\
+T{
+jan, feb, mar, apr, may, jun,
+.br
+jul, aug, sep, oct, nov, dec
+T}
+years;1970, 1971, ..., 2037
+.TE
+.PP
+Leading zeros are required where shown above.
+Days of week and months are case insensitive.
+The restriction on years may be lifted in the future.
+.PP
+In addition, the above values can be listed (using ",") and put in a range
+(using "\-").
+.PP
+Durations are specified as a string of one or more undelimited integer/unit
+pair components.
+The value of the whole duration is the sum of the durations represented by each
+component.
+The valid units are \fBm\fR (minute), \fBh\fR (hour), \fBd\fR (day),
+and \fBw\fR (week).
+While components may be negative, the resulting duration must be nonnegative.
+.SS "Timespan Format (Begin and End Arguments)"
+The format of both \fIBEGIN\fR and \fIEND\fR is
+[\fIHHmmDDMMMyyyy\fR][+\fIOFFSET\fR].
+(The square brackets are not required or valid; they are used here to denote
+that the contents are optional.)
+Here, \fIHH\fR stands for the hour (00-23), \fImm\fR stands for the minute
+(00-59), \fIDD\fR stands for the day-of-month (01-31), \fIMMM\fR stands for the
+abbreviated month name (jan, feb, etc.), \fIyyyy\fR stands for the year
+(1970-2037), and \fIOFFSET\fR stands for a duration offset in the same format
+as durations for events.
+For example, 164509nov2008+-1w1d means 6 days before 4:45\ p.m. on
+9\ November\ 2008.
+.PP
+If the first component of \fIBEGIN\fR/\fIEND\fR is omitted, it defaults to the
+current time; if the second component is omitted, it defaults to 0m.
+.PP
+If \fIBEGIN\fR is omitted entirely, it defaults to the current time.
+If \fIEND\fR is omitted entirely, it defaults to one day after the current
+time.
+.SS "Output Format (\-f Option)"
+sres prints out event occurrences separated by newlines.
+Each event occurrence is displayed according to a format specified using the
+following printf-style conversion specifiers:
+.PP
+.RS
+.IP \fB%%\fR
+a '%' character
+.IP \fB%n\fR
+a newline character
+.IP \fB%t\fR
+a tab character
+.IP \fB%x\fR
+text associated with event
+.IP \fB%d\fR
+duration in minutes
+.IP \fB%b_\fR
+_ corresponding to the beginning of the event
+.IP \fB%e_\fR
+_ corresponding to the end of the event
+.RE
+.PP
+Valid substitutions for _ in \fB%b_\fR and \fB%e_\fR:
+.PP
+.RS
+.IP \fBm\fR
+minutes (00-59)
+.IP \fBh\fR
+hours (01-12)
+.IP \fBH\fR
+hours (00-23)
+.IP \fBp\fR
+a.m. or p.m.
+.IP \fBd\fR
+day of week (Sunday, Monday, Tuesday, etc.)
+.IP \fBD\fR
+day of month (01-31)
+.IP \fBM\fR
+month (January, February, March, etc.)
+.IP \fBy\fR
+year (4-digit decimal year)
+.IP \fBu\fR
+Unix timestamp
+.RE
+.PP
+Valid prefix modifiers for _ in \fB%b_\fR and \fB%e_\fR:
+.PP
+.RS
+.IP \fB0\fR
+zero-based numeric
+.RS
+.IP \fB0d\fR
+"Sunday" -> 0, "Monday" -> 1, etc.
+.IP \fB0M\fR
+"January" -> 00, "February" -> 01, etc.
+.RE
+.IP \fB1\fR
+one-based numeric
+.RS
+.IP \fB1d\fR
+"Sunday" -> 1, "Monday" -> 2, etc.
+.IP \fB1M\fR
+"January" -> 01, "February" -> 02, etc.
+.RE
+.IP \fBb\fR
+change leading zeros to blanks (spaces)
+.IP \fBc\fR
+change case
+.RS
+.IP \fBcp\fR
+"a.m." -> "A.M.", "p.m." -> "P.M."
+.IP \fBcd\fR
+"Sunday" -> "sunday", "Monday" -> "monday", etc.
+.IP \fBcM\fR
+"January" -> "january", "February" -> "february", etc.
+.RE
+.IP \fBs\fR
+short
+.RS
+.IP \fBsm\fR
+drops leading zero
+.IP \fBsh\fR
+drops leading zero
+.IP \fBsH\fR
+drops leading zero
+.IP \fBsp\fR
+"a.m." -> "am", "p.m." -> "pm"
+.IP \fBsd\fR
+"Sunday" -> "Sun", "Monday" -> "Mon", etc.
+.IP \fBsD\fR
+drops leading zero
+.IP \fBsM\fR
+"January" -> "Jan", "February" -> "Feb", etc.
+.IP \fBsy\fR
+drops century number (1986 -> 86, 2009 -> 09, etc.)
+.RE
+.RE
+.PP
+The prefix modifiers can be combined (in an arbitrary order) and the effect
+is probably what you expect.
+Invalid modifiers are ignored.
