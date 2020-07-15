@@ -1,1 +1,2 @@
+#!/bin/sh
 stty cols 80 && man ./sres.1 | col -xb > README.txt && stty cols 0
