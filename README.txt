@@ -16,9 +16,9 @@ DESCRIPTION
        Event descriptions are given to sres over standard input in the follow‐
        ing format:
 
-           # A line comment: "#" must be the first non-whitespace character.
            My Event 1
            @ MINS HOURS DAYS-OF-WEEK DAYS-OF-MONTH MONTHS YEARS DURATION
+           # A line comment: "#" must be the first non-whitespace character.
            My Event 2
            @ MINS HOURS DAYS-OF-WEEK DAYS-OF-MONTH MONTHS YEARS DURATION
            Etc...
