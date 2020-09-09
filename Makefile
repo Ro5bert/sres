@@ -1,10 +1,10 @@
-
 CC ?= gcc
 CFLAGS ?= -Wall
 
-SOURCES = sres.c parse.c output.c util.c
+SOURCES = sres.c parse.c output.c time.c util.c
+HEADERS = sres.h arg.h
 
-sres: sres.h $(SOURCES)
+sres: $(HEADERS) $(SOURCES)
 	$(CC) $(CFLAGS) -o $@ $(SOURCES)
 
 .PHONY: clean

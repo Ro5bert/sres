@@ -1,431 +1,494 @@
-
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <ctype.h>
 #include <assert.h>
+#include <ctype.h>
 #include <limits.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+#include <time.h>
+
 #include "sres.h"
 
-static char *
+/* TODO allow tabs as field separator (currently, only spaces work) */
+
+char *
 nexttok(char **s, char delim)
 {
 	char *tok;
 
 	tok = *s;
-	if (*s) {
-		if ((*s = strchr(*s, delim)) != NULL) {
-			if (delim != '\0') {
-				**s = '\0';
-				++*s;
-			} else {
-				*s = NULL;
-			}
+	if (*s && (*s = strchr(*s, delim))) {
+		if (delim != '\0') {
+			**s = '\0';
+			++*s;
+		} else {
+			*s = NULL;
 		}
 	}
+
 	return tok;
 }
 
-static void
-skipws(char **s) {
-	while (isspace(**s)) {
+void
+skipws(char **s)
+{
+	while (isspace(**s))
 		++*s;
-	}
 }
 
-static void
+void
 stripws(char **s)
 {
 	char *end;
 
 	skipws(s);
 	end = strchr(*s, '\0');
-	if (end != *s) { /* in case *s == '\0' upon invocation */
-		while (isspace(*--end)) {
+	if (end != *s) { /* In case **s == '\0' after skipws(s). */
+		while (isspace(*--end))
 			*end = '\0';
+	}
+}
+
+bool
+parse_num(Spanv *n, char **s)
+{
+	if (!isdigit(**s)) {
+		errset("invalid number: starts with non-digit");
+		return false;
+	}
+	*n = 0;
+	for (; isdigit(**s); ++*s) {
+		if (*n > (SPANV_MAX - (**s-'0')) / 10) {
+			errset("invalid number: out of bounds");
+			return false;
 		}
+		*n = 10*(*n) + (**s-'0');
 	}
+	return true;
 }
 
-static int
-parse_minutes(char **s)
+bool
+parse_min(Spanv *min, char **s)
 {
-	int m;
-
-	if (!isdigit((*s)[0]) || !isdigit((*s)[1])) {
-		push_errctx("bad minutes: invalid length or contains non digits");
-		return -1;
+	if (!parse_num(min, s)) {
+		erradd("invalid minute");
+		return false;
 	}
-	m = ((*s)[0] - '0') * 10 + ((*s)[1] - '0');
-	if (m < 0 || m >= 60) {
-		push_errctx("bad minutes: out of bounds (need 0 <= m < 60)");
-		return -1;
+	if (*min < 0 || *min >= 60) {
+		errset("invalid minute: out of bounds (need 0 <= min < 60)");
+		return false;
 	}
-	*s += 2;
-
-	return m;
+	return true;
 }
 
-static int
-parse_hours(char **s)
+bool
+parse_hour(Spanv *hour, char **s)
 {
-	int h;
-
-	if (!isdigit((*s)[0]) || !isdigit((*s)[1])) {
-		push_errctx("bad hours: invalid length or contains non digits");
-		return -1;
+	if (!parse_num(hour, s)) {
+		erradd("invalid hour");
+		return false;
 	}
-	h = ((*s)[0] - '0') * 10 + ((*s)[1] - '0');
-	if (h < 0 || h >= 24) {
-		push_errctx("bad hours: out of bounds (need 0 <= h < 24)");
-		return -1;
+	if (*hour < 0 || *hour >= 24) {
+		errset("invalid hour: out of bounds (need 0 <= hour < 24)");
+		return false;
 	}
-	*s += 2;
-
-	return h;
+	return true;
 }
 
-static int
-parse_dow(char **s)
+bool
+parse_dow(Spanv *dow, char **s)
 {
-	int dow;
-	char b[3];
-
-	if ((*s)[0] == '\0' || (*s)[1] == '\0' || (*s)[2] == '\0') {
-		push_errctx("bad day of week: invalid length");
-		return -1;
-	}
-	b[0] = tolower((*s)[0]);
-	b[1] = tolower((*s)[1]);
-	b[2] = tolower((*s)[2]);
-	if      (b[0]=='s' && b[1]=='u' && b[2]=='n') dow = SUN;
-	else if (b[0]=='m' && b[1]=='o' && b[2]=='n') dow = MON;
-	else if (b[0]=='t' && b[1]=='u' && b[2]=='e') dow = TUE;
-	else if (b[0]=='w' && b[1]=='e' && b[2]=='d') dow = WED;
-	else if (b[0]=='t' && b[1]=='h' && b[2]=='u') dow = THU;
-	else if (b[0]=='f' && b[1]=='r' && b[2]=='i') dow = FRI;
-	else if (b[0]=='s' && b[1]=='a' && b[2]=='t') dow = SAT;
+	if      (!strncasecmp(*s, "sun", 3)) *dow = SUN;
+	else if (!strncasecmp(*s, "mon", 3)) *dow = MON;
+	else if (!strncasecmp(*s, "tue", 3)) *dow = TUE;
+	else if (!strncasecmp(*s, "wed", 3)) *dow = WED;
+	else if (!strncasecmp(*s, "thu", 3)) *dow = THU;
+	else if (!strncasecmp(*s, "fri", 3)) *dow = FRI;
+	else if (!strncasecmp(*s, "sat", 3)) *dow = SAT;
 	else {
-		push_errctx("bad day of week");
-		return -1;
+		errset("invalid day of week");
+		return false;
 	}
 	*s += 3;
-
-	return dow;
+	return true;
 }
 
-static int
-parse_dom(char **s)
+bool
+parse_dom(Spanv *dom, char **s)
 {
-	int dom;
-
-	if (!isdigit((*s)[0]) || !isdigit((*s)[1])) {
-		push_errctx("bad day of month: invalid length or contains non digits");
-		return -1;
+	if (!parse_num(dom, s)) {
+		erradd("invalid day of month");
+		return false;
 	}
-	dom = ((*s)[0] - '0') * 10 + ((*s)[1] - '0');
-	if (dom < 1 || dom > 31) {
-		push_errctx("bad day of month: out of bounds (need 1 <= dom <= 31)");
-		return -1;
+	if (*dom < 1 || *dom > 31) {
+		errset("invalid day of month: out of bounds (need 1 <= dom <= 31)");
+		return false;
 	}
-	dom -= 1; /* Make dom start at 0 like every other contraint. */
-	*s += 2;
-
-	return dom;
+	*dom -= 1; /* Make dom 0-based like every other contraint. */
+	return true;
 }
 
-static int
-parse_month(char **s)
+bool
+parse_mon(Spanv *mon, char **s)
 {
-	int m;
-	char b[3];
-
-	if ((*s)[0] == '\0' || (*s)[1] == '\0' || (*s)[2] == '\0') {
-		push_errctx("bad month: invalid length");
-		return -1;
-	}
-	b[0] = tolower((*s)[0]);
-	b[1] = tolower((*s)[1]);
-	b[2] = tolower((*s)[2]);
-	if      (b[0]=='j' && b[1]=='a' && b[2]=='n') m = JAN;
-	else if (b[0]=='f' && b[1]=='e' && b[2]=='b') m = FEB;
-	else if (b[0]=='m' && b[1]=='a' && b[2]=='r') m = MAR;
-	else if (b[0]=='a' && b[1]=='p' && b[2]=='r') m = APR;
-	else if (b[0]=='m' && b[1]=='a' && b[2]=='y') m = MAY;
-	else if (b[0]=='j' && b[1]=='u' && b[2]=='n') m = JUN;
-	else if (b[0]=='j' && b[1]=='u' && b[2]=='l') m = JUL;
-	else if (b[0]=='a' && b[1]=='u' && b[2]=='g') m = AUG;
-	else if (b[0]=='s' && b[1]=='e' && b[2]=='p') m = SEP;
-	else if (b[0]=='o' && b[1]=='c' && b[2]=='t') m = OCT;
-	else if (b[0]=='n' && b[1]=='o' && b[2]=='v') m = NOV;
-	else if (b[0]=='d' && b[1]=='e' && b[2]=='c') m = DEC;
+	if      (!strncasecmp(*s, "jan", 3)) *mon = JAN;
+	else if (!strncasecmp(*s, "feb", 3)) *mon = FEB;
+	else if (!strncasecmp(*s, "mar", 3)) *mon = MAR;
+	else if (!strncasecmp(*s, "apr", 3)) *mon = APR;
+	else if (!strncasecmp(*s, "may", 3)) *mon = MAY;
+	else if (!strncasecmp(*s, "jun", 3)) *mon = JUN;
+	else if (!strncasecmp(*s, "jul", 3)) *mon = JUL;
+	else if (!strncasecmp(*s, "aug", 3)) *mon = AUG;
+	else if (!strncasecmp(*s, "sep", 3)) *mon = SEP;
+	else if (!strncasecmp(*s, "oct", 3)) *mon = OCT;
+	else if (!strncasecmp(*s, "nov", 3)) *mon = NOV;
+	else if (!strncasecmp(*s, "dec", 3)) *mon = DEC;
 	else {
-		push_errctx("bad month");
-		return -1;
+		errset("invalid month");
+		return false;
 	}
 	*s += 3;
-
-	return m;
+	return true;
 }
 
-static int
-parse_year(char **s)
+bool
+parse_year(Spanv *year, char **s)
 {
-	int y;
-
-	/* Need exactly 4 digits, since we only allow years after the Unix Epoch and
-	 * before 2038 (ABIs with 32-bit time_t will break) (this restriction can
-	 * be lifted in the future). */
-	if (!isdigit((*s)[0]) || !isdigit((*s)[1]) ||
-			!isdigit((*s)[2]) || !isdigit((*s)[3])) {
-		push_errctx("bad year: invalid length or contains non digits");
-		return -1;
+	if (!parse_num(year, s)) {
+		erradd("invalid year");
+		return false;
 	}
-	y = ((*s)[0] - '0') * 1000 +
-		((*s)[1] - '0') *  100 +
-		((*s)[2] - '0') *   10 +
-		((*s)[3] - '0');
-	if (y < 1970 || y >= 2038) {
-		push_errctx("bad year: out of bounds (need 1970 <= y < 2038)");
-		return -1;
+	/* Year 0BC and year 0AD don't exist. It goes from 1BC to 1AD. */
+	if (*year == 0) {
+		errset("invalid year: zero");
+		return false;
 	}
-	*s += 4;
-
-	return y;
+	if (!strncasecmp(*s, "bc", 2)) {
+		*s += 2;
+		*year = -*year + 1;
+	} else if (!strncasecmp(*s, "ad", 2)) {
+		*s += 2;
+	}
+	return true;
 }
 
-static bool
-parse_constraint(
-		struct constraint **arr, int *len,
-		char *s, int (*str2num)(char**))
+bool
+parse_span(struct span *span, char *s, bool (*str2num)(Spanv*, char**))
 {
-	char *tok1, *tok2;
-	int cap;
+	char *begin;
+
+	begin = nexttok(&s, '-');
+	if (!str2num(&span->begin, &begin))
+		return false;
+	if (s) { /* The constraint is a range. */
+		if (!str2num(&span->end, &s))
+			return false;
+		if (span->end <= span->begin) {
+			errset("invalid range: need begin < end");
+			return false;
+		}
+	} else { /* The constraint is a single value. */
+		span->end = span->begin;
+	}
+
+	return true;
+}
+
+bool
+parse_spanarr(struct spanarr *arr, char *s,
+              bool (*str2num)(Spanv*, char**),
+              Spanv min, Spanv max)
+{
+	struct span span;
 
 	if (strchr(s, '*')) {
 		if (strlen(s) > 1) {
-			push_errctx("invalid use of wildcard");
+			errset("invalid use of wildcard");
 			return false;
 		}
-		*arr = malloc_or_exit(sizeof **arr);
-		*len = 1;
-		(*arr)[0].begin = (*arr)[0].end = -1;
+		span.begin = min;
+		span.end = max;
+		if (!spanarr_insert(arr, span))
+			return false;
 	} else {
-		*arr = malloc_or_exit(4 * sizeof **arr);
-		cap = 4;
-		for (*len = 0; s; ++*len) {
-			if (*len == cap) {
-				*arr = realloc_or_exit(*arr, cap *= 2);
-			}
-			tok2 = nexttok(&s, ',');
-			tok1 = nexttok(&tok2, '-');
-			if (((*arr)[*len].begin = str2num(&tok1)) < 0) return false;
-			if (tok2) { /* The constraint is a range. */
-				if (((*arr)[*len].end = str2num(&tok2)) < 0) return false;
-				if ((*arr)[*len].end <= (*arr)[*len].begin) {
-					push_errctx("invalid range");
-					return false;
-				}
-			} else { /* The constraint is a single value. */
-				(*arr)[*len].end = (*arr)[*len].begin;
-			}
+		while (s) {
+			if (!parse_span(&span, nexttok(&s, ','), str2num))
+				return false;
+			if (!spanarr_insert(arr, span))
+				return false;
 		}
 	}
 
 	return true;
 }
 
-static bool
-parse_duration(long *dur, char *s)
+bool
+parse_duration(long *dur, char **s)
 {
-	char last;
-	long sign, l, scale;
+	int sign;
+	int scale;
+	long l;
 
+	if (**s == '\0') {
+		errset("invalid duration: empty");
+		return false;
+	}
 	*dur = 0;
-	sign = 1;
-	l = 0;
-	scale = 1;
-	for (last = '\0'; s[0] != '\0'; ++s) {
-		switch (last = s[0]) {
-		case '0': case '1': case '2': case '3': case '4':
-		case '5': case '6': case '7': case '8': case '9':
-			if (l > (LONG_MAX - (s[0]-'0')) / 10) {
-				push_errctx("bad duration: out of bounds");
+	while (**s != '\0') {
+		sign = 1;
+		if (**s == '+' || **s == '-') {
+			sign = **s == '+' ? 1 : -1; 
+			++*s;
+		}
+		l = 0;
+		if (!isdigit(**s)) {
+			errset("invalid duration: invalid character (expected digit)");
+			return false;
+		}
+		for (; isdigit(**s); ++*s) {
+			if (l > (LONG_MAX - (**s-'0')) / 10) {
+				errset("invalid duration: out of bounds");
 				return false;
 			}
-			l = l*10 + (s[0]-'0');
-			break;
+			l = l*10 + (**s-'0');
+		}
+		scale = 1;
+		switch (**s) {
 		/* Order of these cases is important! */
 		case 'w': scale *= 7;
 		case 'd': scale *= 24;
 		case 'h': scale *= 60;
 		case 'm':
 			if (l > (LONG_MAX) / scale) {
-				push_errctx("bad duration: out of bounds");
+				errset("invalid duration: out of bounds");
 				return false;
 			}
 			l *= sign * scale;
 			if ((l > 0 && *dur > LONG_MAX - l) ||
-					(l < 0 && *dur < LONG_MIN - l)) {
-				push_errctx("bad duration: out of bounds");
+			    (l < 0 && *dur < LONG_MIN - l)) {
+				errset("invalid duration: out of bounds");
 				return false;
 			}
 			*dur += l;
-			sign = 1;
-			l = 0;
-			scale = 1;
 			break;
-		case '-':
-			if (sign == 1) {
-				sign = -1;
-				break;
-			}
-			/* FALLTHROUGH */
 		default:
-			push_errctx("bad duration: invalid character");
+			errset("invalid duration: invalid character (expected unit)");
 			return false;
 		}
-	}
-	/* last == '\0' is OK: it means empty duration. */
-	if (!strchr("wdhm", last)) {
-		push_errctx("bad duration: missing unit");
-		return false;
+		++*s;
 	}
 
 	return true;
 }
 
+/* Helper for parse_entries. */
 static bool
-parse_constraints(struct entry *entry, char *s)
+parse_field(char **s, struct spanarr *arr, 
+            bool (*str2num)(Spanv*, char**),
+            Spanv min, Spanv max)
 {
-	char *tok;
-
-	++s; /* skip over '@' */
-
-	skipws(&s);
-	tok = nexttok(&s, ' ');
-	if (!parse_constraint(&entry->min, &entry->minl, tok, parse_minutes))
-		return false;
-
-	skipws(&s);
-	tok = nexttok(&s, ' ');
-	if (!parse_constraint(&entry->hour, &entry->hourl, tok, parse_hours))
-		return false;
-
-	skipws(&s);
-	tok = nexttok(&s, ' ');
-	if (!parse_constraint(&entry->dow, &entry->dowl, tok, parse_dow))
-		return false;
-
-	skipws(&s);
-	tok = nexttok(&s, ' ');
-	if (!parse_constraint(&entry->dom, &entry->doml, tok, parse_dom))
-		return false;
-
-	skipws(&s);
-	tok = nexttok(&s, ' ');
-	if (!parse_constraint(&entry->month, &entry->monthl, tok, parse_month))
-		return false;
-
-	skipws(&s);
-	tok = nexttok(&s, ' ');
-	if (!parse_constraint(&entry->year, &entry->yearl, tok, parse_year))
-		return false;
-
-	skipws(&s);
-	tok = nexttok(&s, '\0');
-	if (!parse_duration(&entry->dur, tok)) return false;
-	if (entry->dur < 0) {
-		push_errctx("bad duration: must be nonnegative");
+	if (*s == NULL) {
+		errset("unexpected EOL");
 		return false;
 	}
-
-	return true;
+	skipws(s);
+	return parse_spanarr(arr, nexttok(s, ' '), str2num, min, max);
 }
 
 bool
-parse_entries(struct entry **entry)
+parse_entries(struct entry **entry, size_t *n)
 {
-	char *line, *s;
+	char *line;
+	char *s;
+	char buf[64];
 	size_t len;
 	long linecnt;
+	struct entry *prev;
 
-	*entry = NULL;
 	line = NULL;
 	len = 0;
 	linecnt = 0;
+	*entry = prev = NULL;
 	while (getline(&line, &len, stdin) != -1) {
-		assert(len > 0);
-		++linecnt;
+		/* Unlikely this could ever happen, but be safe. */
+		if (++linecnt == LONG_MAX) {
+			errset("too many lines");
+			goto err;
+		}
 		s = line;
 		stripws(&s);
-		if (s[0] == '#' || s[0] == '\0') {
-			/* Ignore line comments and empty lines. */
+		/* Ignore line comments and whitespace-only/empty lines. */
+		if (*s == '#' || *s == '\0')
 			continue;
+		*entry = malloc_or_exit(sizeof **entry);
+		entry_init(*entry);
+		if (++*n == SIZE_MAX) {
+			errset("too many entries");
+			goto err;
 		}
-		if (s[0] != '@') { /* new entry */
-			if (*entry != NULL) {
-				/* This happens for every entry except the first. */
-				entry = &(*entry)->next;
+
+		/* Start time constraints */
+		if (!parse_field(&s, &(*entry)->min,  parse_min,  0,        59))
+			goto err;
+		if (!parse_field(&s, &(*entry)->hour, parse_hour, 0,        23))
+			goto err;
+		if (!parse_field(&s, &(*entry)->dow,  parse_dow,  0,        6))
+			goto err;
+		if (!parse_field(&s, &(*entry)->dom,  parse_dom,  0,        30))
+			goto err;
+		if (!parse_field(&s, &(*entry)->mon,  parse_mon,  0,        11))
+			goto err;
+		if (!parse_field(&s, &(*entry)->year, parse_year, YEAR_MIN, YEAR_MAX))
+			goto err;
+
+		/* Duration */
+		if (s == NULL) {
+			errset("unexpected EOL");
+			goto err;
+		}
+		skipws(&s);
+		if (!parse_duration(&(*entry)->dur, &(char*){nexttok(&s, ' ')}))
+			goto err;
+		if ((*entry)->dur < 0) {
+			errset("invalid duration: must be nonnegative");
+			goto err;
+		}
+
+		/* Description */
+		if (s != NULL)
+			skipws(&s);
+		if (s == NULL || *s == '\0') {
+			if (prev == NULL) {
+				errset("first entry must have description");
+				goto err;
 			}
-			*entry = malloc_or_exit(sizeof **entry);
-			(*entry)->next = NULL;
-			(*entry)->dur = -1;
+			(*entry)->text = prev->text;
+		} else {
 			(*entry)->text = malloc_or_exit(strlen(s)+1);
 			strcpy((*entry)->text, s);
-		} else { /* selector for prev entry */
-			if (*entry == NULL) {
-				push_errctx("selector without text");
-				push_errctx_linecnt(linecnt);
-				free(line);
-				return false;
-			}
-			/* dur >= 0 means the entry is already populated, so we need to
-			 * allocate a new one. */
-			if ((*entry)->dur >= 0) {
-				(*entry)->next = malloc_or_exit(sizeof **entry);
-				(*entry)->next->next = NULL;
-				(*entry)->next->text = (*entry)->text;
-				entry = &(*entry)->next;
-			}
-			if (!parse_constraints(*entry, s)) {
-				push_errctx_linecnt(linecnt);
-				free(line);
-				return false;
-			}
 		}
+
+		prev = *entry;
+		entry = &(*entry)->next;
 	}
 
 	free(line);
 	return true;
+
+err:
+	snprintf(buf, arrlen(buf), "line %ld", linecnt);
+	erradd(buf);
+	free(line);
+	return false;
 }
 
 bool
-parse_endpoint(struct tm *tm, char *s)
+parse_instant(struct dtime *dt, char *s)
 {
+	int sign;
 	long dur;
+	struct tm now;
 
-	/* Format: [HHmmDDMMMyyyy][+dur] */
-	if (s[0] != '+') {
-		tm->tm_sec = 0;
-		if ((tm->tm_hour = parse_hours(&s))   < 0) return false;
-		if ((tm->tm_min  = parse_minutes(&s)) < 0) return false;
-		if ((tm->tm_mday = parse_dom(&s))     < 0) return false;
-		tm->tm_mday += 1;
-		if ((tm->tm_mon  = parse_month(&s))   < 0) return false;
-		if ((tm->tm_year = parse_year(&s))    < 0) return false;
-		tm->tm_year -= 1900;
-		tm->tm_isdst = -1;
+	/* Format:
+	 *   [TIME]/[DATE][(+|-)OFFSET]
+	 * More precisely:
+	 *   [HOUR[:MIN][am|pm]]/[DOM][MON[YEAR]][(+|-)OFFSET]
+	 * Rules:
+	 *   TIME blank    => now
+	 *   DATE blank    => today
+	 *   HOUR provided => MIN defaults to 00
+	 *   DOM provided  => MON and YEAR default to current
+	 *   MON provided  => DOM defaults to 0 and YEAR defaults to current
+	 *   OFFSET defaults to 0m. */
+
+	if (localtime_r(&(time_t){time(NULL)}, &now) == NULL) {
+		errset("failed to obtain current time");
+		goto err;
 	}
-	if (s[0] == '+') {
-		if (!parse_duration(&dur, s+1)) {
-			return false;
+
+	if (isdigit(*s)) {
+		if (!parse_hour(&dt->hour, &s))
+			goto err;
+		if (*s == ':') {
+			++s;
+			if (!parse_min(&dt->min, &s))
+				goto err;
+		} else {
+			dt->min = 0;
 		}
-		tm->tm_min += dur;
-	} else if (s[0] != '\0') {
-		return false;
+		if (!strncasecmp(s, "am", 2) || !strncasecmp(s, "pm", 2)) {
+			if (dt->hour == 0 || dt->hour > 12) {
+				errset("invalid hour: out of bounds "
+				       "(need 0 < hour <= 12 with am/pm qualifier)");
+				goto err;
+			}
+			dt->hour %= 12;
+			if (*s == 'p')
+				dt->hour += 12;
+			s += 2;
+		}
+	} else {
+		dt->hour = now.tm_hour;
+		dt->min = now.tm_min;
+	}
+
+	if (*s != '/') {
+		errset("expected slash time/date separator");
+		goto err;
+	}
+	++s;
+
+	if (now.tm_year > YEAR_MAX - 1900) {
+		/* As if this will ever happen... */
+		errset("current year too big");
+		goto err;
+	}
+	dt->year = now.tm_year + 1900;
+	dt->dom = -1;
+	if (isdigit(*s) && !parse_dom(&dt->dom, &s))
+		goto err;
+	if (isalpha(*s)) {
+		if (!parse_mon(&dt->mon, &s))
+			goto err;
+		if (dt->dom == -1)
+			dt->dom = 0;
+		if (isdigit(*s) && !parse_year(&dt->year, &s))
+			goto err;
+		/* Else, year is already set to current. */
+	} else if (dt->dom == -1) {
+		dt->dom = now.tm_mday - 1;
+		dt->mon = now.tm_mon;
+		/* Year is already set to current. */
+	}
+	if (!dtime_isdmyvalid(dt)) {
+		errset("dom/mon/year incompatible");
+		goto err;
+	}
+
+	if (*s == '+' || *s == '-') {
+		sign = *s == '+' ? 1 : -1;
+		++s;
+		if (!parse_duration(&dur, &s))
+			goto err;
+		if (sign == -1 && dur == LONG_MIN) {
+			errset("invalid duration: out of bounds");
+			goto err;
+		}
+		dur *= sign;
+		if (!dtime_add(dt, dur))
+			goto err;
+	}
+
+	if (*s != '\0') {
+		errset("invalid character");
+		goto err;
 	}
 
 	return true;
-}
 
+err:
+	erradd("invalid instant");
+	return false;
+}
