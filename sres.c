@@ -14,6 +14,7 @@
 char *argv0;
 
 /* TODO DST is broken: times in skipped hour are included in output */
+/* TODO iteration idea: work in Unix time, adding to a single llong counter */
 
 void
 entry_init(struct entry *e)

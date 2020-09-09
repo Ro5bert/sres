@@ -457,8 +457,9 @@ parse_instant(struct dtime *dt, char *s)
 		if (isdigit(*s) && !parse_year(&dt->year, &s))
 			goto err;
 		/* Else, year is already set to current. */
-	} else if (dt->dom == -1) {
-		dt->dom = now.tm_mday - 1;
+	} else {
+		if (dt->dom == -1)
+			dt->dom = now.tm_mday - 1;
 		dt->mon = now.tm_mon;
 		/* Year is already set to current. */
 	}
