@@ -15,51 +15,6 @@
 #define FLAG_c 0x08
 #define FLAG_s 0x10
 
-/* %%   a '%' character
- * %n   a newline character
- * %t   a tab character
- * %x   text associated with event
- * %d   duration in minutes
- * %b_  _ corresponding to the beginning of the event
- * %e_  _ corresponding to the end of the event
- * Valid substitutions for _ above:
- *   'm'  minutes (00-59)
- *   'h'  hours (01-12)
- *   'H'  hours (00-23)
- *   'p'  a.m. or p.m.
- *   'd'  day of week (Sunday, Monday, Tuesday, etc.)
- *   'D'  day of month (01-31)
- *   'M'  month (January, February, March, etc.)
- *   'y'  year (decimal year; ..., -1 => 2BC, 0 => 1BC, 1 => 1AD, ...)
- *   'Y'  year (decimal year; 1 => 1BC or 1AD, 2 => 1BC or 2AD, ...)
- *   'e'  era (b.c. or a.d.)
- *   'E'  era (b.c.e. or c.e.)
- *   'u'  Unix timestamp
- * Valid prefix modifiers for _ above:
- *   '0'  zero-based numeric
- *        0d  "Sunday" -> 0, "Monday" -> 1, etc.
- *        0M  "January" -> 00, "February" -> 01, etc.
- *   '1'  one-based numeric
- *        1d  "Sunday" -> 1, "Monday" -> 2, etc.
- *        1M  "January" -> 01, "February" -> 02, etc.
- *   'b'  change leading zeros to blanks (spaces)
- *   'c'  change case
- *        cp  "a.m." -> "A.M.", "p.m." -> "P.M."
- *        cd  "Sunday" -> "sunday", "Monday" -> "monday", etc.
- *        cM  "January" -> "january", "February" -> "february", etc.
- *   's'  short
- *        sm  drops leading zero
- *        sh  drops leading zero
- *        sH  drops leading zero
- *        sp  "a.m." -> "am", "p.m." -> "pm"
- *        sd  "Sunday" -> "Sun", "Monday" -> "Mon", etc.
- *        sD  drops leading zero
- *        sM  "January" -> "Jan", "February" -> "Feb", etc.
- *        sy  drops century number (1986 -> 86, 2009 -> 09, etc.)
- * Modifiers can be combined (the order is irrelevant) and the effect is
- * probably what you expect.
- * Invalid modifiers are ignored. */
-
 typedef bool handler(struct dtime *dt, time_t u,
                      bool uvalid, unsigned int flags);
 

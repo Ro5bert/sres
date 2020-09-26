@@ -15,26 +15,27 @@ format:
 .PP
 .in +4n
 .EX
-My Event 1
-@ \fIMINS\fR \fIHOURS\fR \fIDAYS-OF-WEEK\fR \fIDAYS-OF-MONTH\fR \fIMONTHS\fR \fIYEARS\fR \fIDURATION\fR
+\fIMINS\fR \fIHOURS\fR \fIDAYS-OF-WEEK\fR \fIDAYS-OF-MONTH\fR \fIMONTHS\fR \fIYEARS\fR \fIDURATION\fR Event1
+\fIMINS\fR \fIHOURS\fR \fIDAYS-OF-WEEK\fR \fIDAYS-OF-MONTH\fR \fIMONTHS\fR \fIYEARS\fR \fIDURATION\fR
 # A line comment: "#" must be the first non-whitespace character.
-My Event 2
-@ \fIMINS\fR \fIHOURS\fR \fIDAYS-OF-WEEK\fR \fIDAYS-OF-MONTH\fR \fIMONTHS\fR \fIYEARS\fR \fIDURATION\fR
-Etc...
+\fIMINS\fR \fIHOURS\fR \fIDAYS-OF-WEEK\fR \fIDAYS-OF-MONTH\fR \fIMONTHS\fR \fIYEARS\fR \fIDURATION\fR Event2
+[Etc...]
 .EE
 .in
 .PP
-Each event has a one line description and zero or more "selectors" (the lines
-beginning with\ "@").
-Each selector consists of seven fields, as shown above.
+Each event is one line starting with seven fields, as shown above.
 The first six fields describe the start time of an event in a cron-like format,
 and the last field specifies the duration of the event associated with the
 preceding start time description.
-An event with zero selectors never happens; an event with multiple selectors
-happens at the times described by each of its selectors, with duplicates
-removed.
+Everything on the line after the seven fields constitutes the event
+description.
+An event with no description has the same description as the previous event,
+and events defined in this way are deduplicated.
+For example, "Event1" above has two lines describing when and for how long
+it occurs.
+(The very first event in the input must have a description.)
 .PP
-Here are some examples of selectors:
+Here are some examples of the first seven fields:
 .PP
 .TP
 .B "00 13 tue,fri * jan-apr,sep 1986 3h30m"
@@ -60,22 +61,21 @@ l l
 --
 l l.
 Field;Values
-mins;00, 01, ..., 59
-hours;00, 01, ..., 23
+mins;0, 1, ..., 59
+hours;0, 1, ..., 23
 days-of-week;sun, mon, tue, wed, thu, fri, sat
-days-of-month;01, 02, ..., 31
+days-of-month;1, 2, ..., 31
 months;\
 T{
 jan, feb, mar, apr, may, jun,
 .br
 jul, aug, sep, oct, nov, dec
 T}
-years;1970, 1971, ..., 2037
+years;..., 2BC, 1BC, 1AD, 2AD, ...
 .TE
 .PP
-Leading zeros are required where shown above.
 Days of week and months are case insensitive.
-The restriction on years may be lifted in the future.
+When a year doesn't have an era suffix (BC/AD), AD is assumed.
 .PP
 In addition, the above values can be listed (using ",") and put in a range
 (using "\-").
@@ -89,19 +89,23 @@ and \fBw\fR (week).
 While components may be negative, the resulting duration must be nonnegative.
 .SS "Timespan Format (Begin and End Arguments)"
 The format of both \fIBEGIN\fR and \fIEND\fR is
-[\fIHHmmDDMMMyyyy\fR][+\fIOFFSET\fR].
+[\fITIME\fR]/[\fIDATE\fR][(+|-)\fIOFFSET\fR], where \fITIME\fR is
+[\fIHOUR\fR[:\fIMIN\fR][am|pm]], \fIHOUR\fR is
+[\fIDOM\fR][\fIMON\fR[\fIYEAR\fR]], and \fIOFFSET\fR is a duration
+(same format as described above).
 (The square brackets are not required or valid; they are used here to denote
 that the contents are optional.)
-Here, \fIHH\fR stands for the hour (00-23), \fImm\fR stands for the minute
-(00-59), \fIDD\fR stands for the day-of-month (01-31), \fIMMM\fR stands for the
-abbreviated month name (jan, feb, etc.), \fIyyyy\fR stands for the year
-(1970-2037), and \fIOFFSET\fR stands for a duration offset in the same format
-as durations for events.
-For example, 164509nov2008+-1w1d means 6 days before 4:45\ p.m. on
-9\ November\ 2008.
 .PP
-If the first component of \fIBEGIN\fR/\fIEND\fR is omitted, it defaults to the
-current time; if the second component is omitted, it defaults to 0m.
+If \fITIME\fR is omitted, it defaults to now.
+If \fIDATE\fR is omitted, it defaults to today.
+If \fIHOUR\fR is provided, \fIMIN\fR defaults to 0.
+If \fIDOM\fR is provided, \fIMON\fR and \fIYEAR\fR default to their current
+values.
+If \fIMON\fR is provided, \fIDOM\fR defaults to 0 and \fIYEAR\fR defaults to
+its current value.
+In all cases, \fIOFFSET\fR defaults to 0m.
+.PP
+In particular, "/" means now and "0/" means the beginning of today.
 .SS "Output Format (\-f Option)"
 sres prints out event occurrences separated by newlines.
 Each event occurrence is displayed according to a format specified using the
@@ -142,7 +146,11 @@ day of month (01-31)
 .IP \fBM\fR
 month (January, February, March, etc.)
 .IP \fBy\fR
-year (4-digit decimal year)
+integer year (..., -1 => 2BC, 0 => 1BC, 1 => 1AD, ...)
+.IP \fBY\fR
+positive integer year (1 means 1BC or 1AD, etc.)
+.IP \fBe\fR
+era (b.c. or a.d.)
 .IP \fBu\fR
 Unix timestamp
 .RE
@@ -177,26 +185,24 @@ change case
 "Sunday" -> "sunday", "Monday" -> "monday", etc.
 .IP \fBcM\fR
 "January" -> "january", "February" -> "february", etc.
+.IP \fBce\fR
+"b.c." -> "B.C.", "a.d." -> "A.D."
 .RE
 .IP \fBs\fR
 short
 .RS
-.IP \fBsm\fR
-drops leading zero
-.IP \fBsh\fR
-drops leading zero
-.IP \fBsH\fR
+.IP \fBsm\fR, \fBsh\fR, \fBsH\fR, \fBsD\fR
 drops leading zero
 .IP \fBsp\fR
 "a.m." -> "am", "p.m." -> "pm"
 .IP \fBsd\fR
 "Sunday" -> "Sun", "Monday" -> "Mon", etc.
-.IP \fBsD\fR
-drops leading zero
 .IP \fBsM\fR
 "January" -> "Jan", "February" -> "Feb", etc.
-.IP \fBsy\fR
+.IP \fBsy\fR and \fBsY\fR
 drops century number (1986 -> 86, 2009 -> 09, etc.)
+.IP \fBse\fR
+"b.c." -> "bc", "a.d." -> "ad"
 .RE
 .RE
 .PP
